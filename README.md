@@ -273,7 +273,6 @@ Sources:
 The constitutional chain is the right solution to make sure that the language model follows the rules. In this case, we want to make sure that the model will not hurt the brands images by using bad language. So, the following Polite Principle will keep the model inline. The following principle ask the model to rewrite its answer while being polite if a bad response was detected.
 
 ```
-
 from langchain.chains.constitutional_ai.base import ConstitutionalChain
 from langchain.chains.constitutional_ai.models import ConstitutionalPrinciple
 
@@ -342,4 +341,5 @@ To recap, we defined a constitutional chain which is intructed to not change any
 
 
 # Conclusion
+
 One of the most critical aspects of AI integration is ensuring that the model's response is aligned with the application's objective. We saw how it is possible to iterate over the model’s output to gradually improve the response quality.
