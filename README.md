@@ -284,7 +284,7 @@ polite_principle = ConstitutionalPrinciple(
 )
 ```
 
-The rest of the lesson will present a workaround to use the ConstitutionalChain with the RetrievalQA. At the time of writting this lesson, the constitutional principles from LangChain only accept LLMChain type, therefore, we present a simple solution to make it compatibale with RetrievalQA as well.
+The rest of the repo will present a workaround to use the ConstitutionalChain with the RetrievalQA. At the time of writting this repo, the constitutional principles from LangChain only accept LLMChain type, therefore, we present a simple solution to make it compatibale with RetrievalQA as well.
 
 The following code will define a identity chain with the LLMChain types. The objective is to have a chain that returns exactly whatever we pass to it. Then, it will be possible to use our identity chain as a middleman between the QA and constitutional chains.
 
