@@ -341,14 +341,22 @@ void simd_sgemm(int M, int N, int K,
                 // Pack A panel
                 pack_A(A + i * lda + k, lda, mc, kc, A_pack.get());
 
-                // Micro-kernel loop over the MC × NC tile
+                // Micro-kernel loop over the MC × NC tile.
+                // pack_A stores in column-major micro-panel order:
+                //   A_pack[k * MR + m]  for k in [0,kc), m in [0,MR)
+                // So the ii-th MR-row block starts at byte offset ii * kc * MR floats —
+                // but since we process one MR block at a time, the pointer is:
+                //   A_pack + (ii / MR) * (kc * MR)
                 for (int ii = 0; ii < mc; ii += MR) {
                     int mr = std::min(MR, mc - ii);
+                    // Pointer into the packed A panel for this MR-block:
+                    // Each prior MR block occupies kc * MR floats.
+                    const float* A_micro = A_pack.get() + (ii / MR) * (kc * MR);
                     for (int jj = 0; jj < nc; jj += NR) {
 #ifdef __AVX2__
                         gemm_micro_6x16_avx2(
                             kc,
-                            A_pack.get() + ii * kc,        // not quite right for pack layout; simplified
+                            A_micro,
                             B_pack.get() + jj,
                             C + (i + ii) * ldc + (j + jj),
                             ldc
