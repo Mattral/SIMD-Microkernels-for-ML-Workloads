@@ -131,6 +131,12 @@ Key details:
 > * No frequency locking
 > * No statistical analysis beyond min-of-N
 
+The current `bench` harness in this repo implements the P0 remediation
+prescriptions: a short TSC calibration to estimate ticks/second, LFENCE/RDTSCP
+serialised timestamps, and optional CPU affinity pinning. The harness reports
+per-configuration cycle counts, elapsed milliseconds, achieved GFLOPS, and a
+utilisation percentage relative to a per-core theoretical peak.
+
 For rigorous benchmarking, external tools (e.g., `perf`, VTune) are recommended.
 
 ---
@@ -165,6 +171,41 @@ This project intentionally omits many techniques used in production libraries:
 * No comparison against MKL/OpenBLAS included yet
 
 As a result, performance is **educational, not state-of-the-art**.
+
+## Cache-Arithmetic Derivation (example)
+
+To reason about whether a GEMM kernel is memory- or compute-bound we use a
+simple arithmetic-intensity model. For an $M\times K\times N$ GEMM the total
+work is $2\cdot M\cdot N\cdot K$ FLOPs. Minimal traffic to read inputs and
+write outputs (FP32) is approximately $4\cdot(MK + KN + MN)$ bytes. The
+arithmetic intensity (AI) is therefore
+
+$$
+\mathrm{AI} = \frac{2 M N K}{4 (M K + K N + M N)}\ \mathrm{FLOP/byte}.
+$$
+
+For 256×256×256 this evaluates to ~$42.7$ FLOP/byte which is well into the
+compute-bound regime on most desktop/server CPUs — hence improving the inner
+kernel and packing typically yields better GFLOPS than micro-optimising loads.
+
+## Roofline & Benchmarking Methodology
+
+This repository includes a compact roofline-style summary in the `bench`
+output. The summary compares measured per-core GFLOPS against a conservative
+single-core peak (AVX2 FMA: 16 FP32 ops per cycle per core × measured Hz).
+`BENCHMARKS.md` contains verbatim runs captured on the host used during
+development. For reproducible tables, run:
+
+```bash
+mkdir build && cd build
+cmake -DCMAKE_BUILD_TYPE=Release ..
+cmake --build . --parallel
+./bench
+```
+
+Interpret `bench` results as per-core, single-threaded throughput. For system
+wide peak comparisons or multithreaded experiments, use a controlled
+environment (disable turbo, pin threads, collect hardware counters with `perf`).
 
 ---
 

@@ -1,1 +1,1 @@
-/usr/bin/c++ -O2 -g -DNDEBUG CMakeFiles/simd_tests.dir/test_alignment.cpp.o CMakeFiles/simd_tests.dir/test_gelu.cpp.o CMakeFiles/simd_tests.dir/test_gemm.cpp.o -o simd_tests  libsimd_kernels_precision_lib.a 
+/usr/bin/c++ -O3 -DNDEBUG CMakeFiles/simd_tests.dir/test_alignment.cpp.o CMakeFiles/simd_tests.dir/test_gelu.cpp.o CMakeFiles/simd_tests.dir/test_gemm.cpp.o -o simd_tests  libsimd_kernels_precision_lib.a 

@@ -140,19 +140,6 @@ simd_kernels_lib/fast:
 .PHONY : simd_kernels_lib/fast
 
 #=============================================================================
-# Target rules for targets named simd_kernels
-
-# Build rule for target.
-simd_kernels: cmake_check_build_system
-	$(MAKE) $(MAKESILENT) -f CMakeFiles/Makefile2 simd_kernels
-.PHONY : simd_kernels
-
-# fast build rule for target.
-simd_kernels/fast:
-	$(MAKE) $(MAKESILENT) -f CMakeFiles/simd_kernels.dir/build.make CMakeFiles/simd_kernels.dir/build
-.PHONY : simd_kernels/fast
-
-#=============================================================================
 # Target rules for targets named bench
 
 # Build rule for target.
@@ -190,30 +177,6 @@ simd_tests: cmake_check_build_system
 simd_tests/fast:
 	$(MAKE) $(MAKESILENT) -f tests/CMakeFiles/simd_tests.dir/build.make tests/CMakeFiles/simd_tests.dir/build
 .PHONY : simd_tests/fast
-
-src/bindings/pybind_entry.o: src/bindings/pybind_entry.cpp.o
-.PHONY : src/bindings/pybind_entry.o
-
-# target to build an object file
-src/bindings/pybind_entry.cpp.o:
-	$(MAKE) $(MAKESILENT) -f CMakeFiles/simd_kernels.dir/build.make CMakeFiles/simd_kernels.dir/src/bindings/pybind_entry.cpp.o
-.PHONY : src/bindings/pybind_entry.cpp.o
-
-src/bindings/pybind_entry.i: src/bindings/pybind_entry.cpp.i
-.PHONY : src/bindings/pybind_entry.i
-
-# target to preprocess a source file
-src/bindings/pybind_entry.cpp.i:
-	$(MAKE) $(MAKESILENT) -f CMakeFiles/simd_kernels.dir/build.make CMakeFiles/simd_kernels.dir/src/bindings/pybind_entry.cpp.i
-.PHONY : src/bindings/pybind_entry.cpp.i
-
-src/bindings/pybind_entry.s: src/bindings/pybind_entry.cpp.s
-.PHONY : src/bindings/pybind_entry.s
-
-# target to generate assembly for a file
-src/bindings/pybind_entry.cpp.s:
-	$(MAKE) $(MAKESILENT) -f CMakeFiles/simd_kernels.dir/build.make CMakeFiles/simd_kernels.dir/src/bindings/pybind_entry.cpp.s
-.PHONY : src/bindings/pybind_entry.cpp.s
 
 src/kernels/avx_matmul.o: src/kernels/avx_matmul.cpp.o
 .PHONY : src/kernels/avx_matmul.o
@@ -297,13 +260,9 @@ help:
 	@echo "... rebuild_cache"
 	@echo "... test"
 	@echo "... bench"
-	@echo "... simd_kernels"
 	@echo "... simd_kernels_lib"
 	@echo "... simd_kernels_precision_lib"
 	@echo "... simd_tests"
-	@echo "... src/bindings/pybind_entry.o"
-	@echo "... src/bindings/pybind_entry.i"
-	@echo "... src/bindings/pybind_entry.s"
 	@echo "... src/kernels/avx_matmul.o"
 	@echo "... src/kernels/avx_matmul.i"
 	@echo "... src/kernels/avx_matmul.s"

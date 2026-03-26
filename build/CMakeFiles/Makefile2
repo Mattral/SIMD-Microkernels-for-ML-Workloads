@@ -64,7 +64,6 @@ CMAKE_BINARY_DIR = /workspaces/SIMD-Microkernels-for-ML-Workloads/build
 
 # The main recursive "all" target.
 all: CMakeFiles/simd_kernels_lib.dir/all
-all: CMakeFiles/simd_kernels.dir/all
 all: CMakeFiles/bench.dir/all
 all: tests/all
 .PHONY : all
@@ -75,7 +74,6 @@ preinstall: tests/preinstall
 
 # The main recursive "clean" target.
 clean: CMakeFiles/simd_kernels_lib.dir/clean
-clean: CMakeFiles/simd_kernels.dir/clean
 clean: CMakeFiles/bench.dir/clean
 clean: tests/clean
 .PHONY : clean
@@ -104,7 +102,7 @@ tests/clean: tests/CMakeFiles/simd_tests.dir/clean
 CMakeFiles/simd_kernels_lib.dir/all:
 	$(MAKE) $(MAKESILENT) -f CMakeFiles/simd_kernels_lib.dir/build.make CMakeFiles/simd_kernels_lib.dir/depend
 	$(MAKE) $(MAKESILENT) -f CMakeFiles/simd_kernels_lib.dir/build.make CMakeFiles/simd_kernels_lib.dir/build
-	@$(CMAKE_COMMAND) -E cmake_echo_color "--switch=$(COLOR)" --progress-dir=/workspaces/SIMD-Microkernels-for-ML-Workloads/build/CMakeFiles --progress-num=5,6,7 "Built target simd_kernels_lib"
+	@$(CMAKE_COMMAND) -E cmake_echo_color "--switch=$(COLOR)" --progress-dir=/workspaces/SIMD-Microkernels-for-ML-Workloads/build/CMakeFiles --progress-num=3,4,5 "Built target simd_kernels_lib"
 .PHONY : CMakeFiles/simd_kernels_lib.dir/all
 
 # Build rule for subdir invocation for target.
@@ -122,32 +120,6 @@ simd_kernels_lib: CMakeFiles/simd_kernels_lib.dir/rule
 CMakeFiles/simd_kernels_lib.dir/clean:
 	$(MAKE) $(MAKESILENT) -f CMakeFiles/simd_kernels_lib.dir/build.make CMakeFiles/simd_kernels_lib.dir/clean
 .PHONY : CMakeFiles/simd_kernels_lib.dir/clean
-
-#=============================================================================
-# Target rules for target CMakeFiles/simd_kernels.dir
-
-# All Build rule for target.
-CMakeFiles/simd_kernels.dir/all: CMakeFiles/simd_kernels_lib.dir/all
-	$(MAKE) $(MAKESILENT) -f CMakeFiles/simd_kernels.dir/build.make CMakeFiles/simd_kernels.dir/depend
-	$(MAKE) $(MAKESILENT) -f CMakeFiles/simd_kernels.dir/build.make CMakeFiles/simd_kernels.dir/build
-	@$(CMAKE_COMMAND) -E cmake_echo_color "--switch=$(COLOR)" --progress-dir=/workspaces/SIMD-Microkernels-for-ML-Workloads/build/CMakeFiles --progress-num=3,4 "Built target simd_kernels"
-.PHONY : CMakeFiles/simd_kernels.dir/all
-
-# Build rule for subdir invocation for target.
-CMakeFiles/simd_kernels.dir/rule: cmake_check_build_system
-	$(CMAKE_COMMAND) -E cmake_progress_start /workspaces/SIMD-Microkernels-for-ML-Workloads/build/CMakeFiles 5
-	$(MAKE) $(MAKESILENT) -f CMakeFiles/Makefile2 CMakeFiles/simd_kernels.dir/all
-	$(CMAKE_COMMAND) -E cmake_progress_start /workspaces/SIMD-Microkernels-for-ML-Workloads/build/CMakeFiles 0
-.PHONY : CMakeFiles/simd_kernels.dir/rule
-
-# Convenience name for target.
-simd_kernels: CMakeFiles/simd_kernels.dir/rule
-.PHONY : simd_kernels
-
-# clean rule for target.
-CMakeFiles/simd_kernels.dir/clean:
-	$(MAKE) $(MAKESILENT) -f CMakeFiles/simd_kernels.dir/build.make CMakeFiles/simd_kernels.dir/clean
-.PHONY : CMakeFiles/simd_kernels.dir/clean
 
 #=============================================================================
 # Target rules for target CMakeFiles/bench.dir
@@ -182,7 +154,7 @@ CMakeFiles/bench.dir/clean:
 tests/CMakeFiles/simd_kernels_precision_lib.dir/all:
 	$(MAKE) $(MAKESILENT) -f tests/CMakeFiles/simd_kernels_precision_lib.dir/build.make tests/CMakeFiles/simd_kernels_precision_lib.dir/depend
 	$(MAKE) $(MAKESILENT) -f tests/CMakeFiles/simd_kernels_precision_lib.dir/build.make tests/CMakeFiles/simd_kernels_precision_lib.dir/build
-	@$(CMAKE_COMMAND) -E cmake_echo_color "--switch=$(COLOR)" --progress-dir=/workspaces/SIMD-Microkernels-for-ML-Workloads/build/CMakeFiles --progress-num=8,9,10 "Built target simd_kernels_precision_lib"
+	@$(CMAKE_COMMAND) -E cmake_echo_color "--switch=$(COLOR)" --progress-dir=/workspaces/SIMD-Microkernels-for-ML-Workloads/build/CMakeFiles --progress-num=6,7,8 "Built target simd_kernels_precision_lib"
 .PHONY : tests/CMakeFiles/simd_kernels_precision_lib.dir/all
 
 # Build rule for subdir invocation for target.
@@ -208,7 +180,7 @@ tests/CMakeFiles/simd_kernels_precision_lib.dir/clean:
 tests/CMakeFiles/simd_tests.dir/all: tests/CMakeFiles/simd_kernels_precision_lib.dir/all
 	$(MAKE) $(MAKESILENT) -f tests/CMakeFiles/simd_tests.dir/build.make tests/CMakeFiles/simd_tests.dir/depend
 	$(MAKE) $(MAKESILENT) -f tests/CMakeFiles/simd_tests.dir/build.make tests/CMakeFiles/simd_tests.dir/build
-	@$(CMAKE_COMMAND) -E cmake_echo_color "--switch=$(COLOR)" --progress-dir=/workspaces/SIMD-Microkernels-for-ML-Workloads/build/CMakeFiles --progress-num=11,12,13,14 "Built target simd_tests"
+	@$(CMAKE_COMMAND) -E cmake_echo_color "--switch=$(COLOR)" --progress-dir=/workspaces/SIMD-Microkernels-for-ML-Workloads/build/CMakeFiles --progress-num=9,10,11,12 "Built target simd_tests"
 .PHONY : tests/CMakeFiles/simd_tests.dir/all
 
 # Build rule for subdir invocation for target.

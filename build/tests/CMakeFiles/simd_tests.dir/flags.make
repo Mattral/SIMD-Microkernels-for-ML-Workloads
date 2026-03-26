@@ -6,5 +6,5 @@ CXX_DEFINES =
 
 CXX_INCLUDES = -I/workspaces/SIMD-Microkernels-for-ML-Workloads/src/kernels
 
-CXX_FLAGS = -O2 -g -DNDEBUG -std=gnu++17 -O2 -march=native -mfma -DNDEBUG
+CXX_FLAGS = -O3 -DNDEBUG -std=gnu++17 -O2 -march=native -mfma -DNDEBUG
 

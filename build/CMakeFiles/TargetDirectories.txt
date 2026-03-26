@@ -1,5 +1,4 @@
 /workspaces/SIMD-Microkernels-for-ML-Workloads/build/CMakeFiles/simd_kernels_lib.dir
-/workspaces/SIMD-Microkernels-for-ML-Workloads/build/CMakeFiles/simd_kernels.dir
 /workspaces/SIMD-Microkernels-for-ML-Workloads/build/CMakeFiles/bench.dir
 /workspaces/SIMD-Microkernels-for-ML-Workloads/build/CMakeFiles/test.dir
 /workspaces/SIMD-Microkernels-for-ML-Workloads/build/CMakeFiles/edit_cache.dir

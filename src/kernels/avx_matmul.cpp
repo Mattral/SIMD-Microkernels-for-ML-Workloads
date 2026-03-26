@@ -41,6 +41,9 @@
 
 #include <cstring>
 #include <algorithm>
+#ifdef _OPENMP
+#include <omp.h>
+#endif
 
 #ifdef __AVX512F__
 #  include <immintrin.h>
@@ -341,13 +344,22 @@ void simd_sgemm(int M, int N, int K,
                 C[i * ldc + j] *= beta;
     }
 
-    // Allocate packing buffers (L2-resident)
-    auto A_pack = make_aligned_array<float>(((MC + MR - 1) / MR) * KC * MR);
-    auto B_pack = make_aligned_array<float>(((NC + NR - 1) / NR) * KC * NR);
+    // Number of N-tiles
+    int num_j_blocks = (N + NC - 1) / NC;
 
-    // 3-level tiled loop: N-tile → K-tile → M-tile → micro-kernel
-    for (int j = 0; j < N; j += NC) {
+    // Parallelize across N-tiles (outermost loop) with OpenMP if available.
+#ifdef _OPENMP
+#pragma omp parallel for schedule(static)
+    for (int jb = 0; jb < num_j_blocks; ++jb) {
+#else
+    for (int jb = 0; jb < num_j_blocks; ++jb) {
+#endif
+        int j = jb * NC;
         int nc = std::min(NC, N - j);
+
+        // Per-thread packing buffers to avoid races
+        auto A_pack = make_aligned_array<float>(((MC + MR - 1) / MR) * KC * MR);
+        auto B_pack = make_aligned_array<float>(((NC + NR - 1) / NR) * KC * NR);
 
         for (int k = 0; k < K; k += KC) {
             int kc = std::min(KC, K - k);
@@ -358,40 +370,50 @@ void simd_sgemm(int M, int N, int K,
             for (int i = 0; i < M; i += MC) {
                 int mc = std::min(MC, M - i);
 
-                // Pack A panel. Pack alpha-scaled A values so the inner kernel
-                // can accumulate alpha * A * B directly into C.
+                // Pack A panel for this thread
                 pack_A(A + i * lda + k, lda, mc, kc, A_pack.get(), alpha);
 
-                // Micro-kernel loop over the MC × NC tile.
-                // pack_A stores in column-major micro-panel order:
-                //   A_pack[k * MR + m]  for k in [0,kc), m in [0,MR)
-                // So the ii-th MR-row block starts at byte offset ii * kc * MR floats —
-                // but since we process one MR block at a time, the pointer is:
-                //   A_pack + (ii / MR) * (kc * MR)
                 for (int ii = 0; ii < mc; ii += MR) {
                     int mr = std::min(MR, mc - ii);
-                    // Pointer into the packed A panel for this MR-block:
-                    // Each prior MR block occupies kc * MR floats.
                     const float* A_micro = A_pack.get() + (ii / MR) * (kc * MR);
                     for (int jj = 0; jj < nc; jj += NR) {
                         int nr = std::min(NR, nc - jj);
                         if (mr == MR && nr == NR) {
                             int block = jj / NR;
                             float* B_block = B_pack.get() + block * kc * NR;
-#ifdef __AVX2__
-                            gemm_micro_6x16_avx2(
-                                kc,
-                                A_micro,
-                                B_block,
-                                C + (i + ii) * ldc + (j + jj),
-                                ldc
-                            );
-#else
-                            scalar_sgemm(MR, NR, kc,
-                                         A + (i + ii) * lda + k, lda,
-                                         B + k * ldb + (j + jj), ldb,
-                                         C + (i + ii) * ldc + (j + jj), ldc);
+                            // Runtime dispatch: prefer AVX-512 if available at runtime
+#if defined(__AVX512F__)
+                            bool have_avx512 = false;
+#if defined(__GNUC__) || defined(__clang__)
+                            have_avx512 = __builtin_cpu_supports("avx512f");
 #endif
+                            if (have_avx512) {
+                                // AVX-512 optimized microkernel (if compiled with AVX-512)
+                                gemm_micro_6x32_avx512(
+                                    kc,
+                                    A_micro,
+                                    B_block,
+                                    C + (i + ii) * ldc + (j + jj),
+                                    ldc
+                                );
+                            } else
+#endif
+                            {
+#ifdef __AVX2__
+                                gemm_micro_6x16_avx2(
+                                    kc,
+                                    A_micro,
+                                    B_block,
+                                    C + (i + ii) * ldc + (j + jj),
+                                    ldc
+                                );
+#else
+                                scalar_sgemm(MR, NR, kc,
+                                             A + (i + ii) * lda + k, lda,
+                                             B + k * ldb + (j + jj), ldb,
+                                             C + (i + ii) * ldc + (j + jj), ldc);
+#endif
+                            }
                         } else {
                             scalar_sgemm(mr, nr, kc,
                                          A + (i + ii) * lda + k, lda,
@@ -404,6 +426,51 @@ void simd_sgemm(int M, int N, int K,
         }
     }
 
+
+#if defined(__AVX512F__)
+/**
+ * Simple AVX-512 microkernel: 6×32 blocking using __m512 accumulators.
+ * This is a straightforward port of the AVX2 kernel for machines compiled
+ * with AVX-512 support. It is intentionally conservative to avoid register
+ * pressure while demonstrating a 512-bit path and a runtime dispatch.
+ */
+static void gemm_micro_6x32_avx512(int kc,
+                                   const float* __restrict__ A,
+                                   const float* __restrict__ B,
+                                   float*       __restrict__ C,
+                                   int ldc) {
+    __m512 c0, c1, c2, c3, c4, c5;
+    c0 = _mm512_loadu_ps(C + 0*ldc);
+    c1 = _mm512_loadu_ps(C + 1*ldc);
+    c2 = _mm512_loadu_ps(C + 2*ldc);
+    c3 = _mm512_loadu_ps(C + 3*ldc);
+    c4 = _mm512_loadu_ps(C + 4*ldc);
+    c5 = _mm512_loadu_ps(C + 5*ldc);
+
+    const float* a_ptr = A;
+    const float* b_ptr = B;
+
+    for (int k = 0; k < kc; ++k) {
+        __m512 b = _mm512_load_ps(b_ptr);
+        b_ptr += 32;
+
+        __m512 a0 = _mm512_set1_ps(a_ptr[0]); c0 = _mm512_fmadd_ps(a0, b, c0);
+        __m512 a1 = _mm512_set1_ps(a_ptr[1]); c1 = _mm512_fmadd_ps(a1, b, c1);
+        __m512 a2 = _mm512_set1_ps(a_ptr[2]); c2 = _mm512_fmadd_ps(a2, b, c2);
+        __m512 a3 = _mm512_set1_ps(a_ptr[3]); c3 = _mm512_fmadd_ps(a3, b, c3);
+        __m512 a4 = _mm512_set1_ps(a_ptr[4]); c4 = _mm512_fmadd_ps(a4, b, c4);
+        __m512 a5 = _mm512_set1_ps(a_ptr[5]); c5 = _mm512_fmadd_ps(a5, b, c5);
+        a_ptr += MR;
+    }
+
+    _mm512_storeu_ps(C + 0*ldc, c0);
+    _mm512_storeu_ps(C + 1*ldc, c1);
+    _mm512_storeu_ps(C + 2*ldc, c2);
+    _mm512_storeu_ps(C + 3*ldc, c3);
+    _mm512_storeu_ps(C + 4*ldc, c4);
+    _mm512_storeu_ps(C + 5*ldc, c5);
+}
+#endif
 }
 
 // ─── Simple reference (scalar) GEMM — used by benchmark for comparison ───────

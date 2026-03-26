@@ -7,7 +7,7 @@ set(CMAKE_CXX_STANDARD_REQUIRED ON)
 
 # ─── Find dependencies ────────────────────────────────────────────────────────
 find_package(Python3 REQUIRED COMPONENTS Interpreter Development)
-find_package(pybind11 REQUIRED)
+find_package(pybind11)
 
 # ─── Detect AVX support ──────────────────────────────────────────────────────
 include(CheckCXXCompilerFlag)
@@ -45,14 +45,28 @@ add_library(simd_kernels_lib STATIC
     src/kernels/intrinsic_gelu.cpp
 )
 target_include_directories(simd_kernels_lib PUBLIC src/kernels)
+set_target_properties(simd_kernels_lib PROPERTIES POSITION_INDEPENDENT_CODE ON)
 target_compile_options(simd_kernels_lib PRIVATE ${PERF_FLAGS})
 
-# ─── Python extension module ──────────────────────────────────────────────────
-pybind11_add_module(simd_kernels
-    src/bindings/pybind_entry.cpp
-)
-target_link_libraries(simd_kernels PRIVATE simd_kernels_lib)
-target_compile_options(simd_kernels PRIVATE ${PERF_FLAGS})
+# Optional OpenMP support for multithreaded kernels (v0.6)
+find_package(OpenMP)
+if(OpenMP_CXX_FOUND)
+    message(STATUS "OpenMP found: enabling for simd_kernels_lib and bench")
+    target_link_libraries(simd_kernels_lib PUBLIC OpenMP::OpenMP_CXX)
+else()
+    message(STATUS "OpenMP not found: building single-threaded kernels")
+endif()
+
+# ─── Python extension module (optional) ───────────────────────────────────────
+if(pybind11_FOUND)
+    pybind11_add_module(simd_kernels
+        src/bindings/pybind_entry.cpp
+    )
+    target_link_libraries(simd_kernels PRIVATE simd_kernels_lib)
+    target_compile_options(simd_kernels PRIVATE ${PERF_FLAGS})
+else()
+    message(STATUS "pybind11 not found: skipping Python extension build")
+endif()
 
 # ─── Standalone benchmark executable ─────────────────────────────────────────
 add_executable(bench
