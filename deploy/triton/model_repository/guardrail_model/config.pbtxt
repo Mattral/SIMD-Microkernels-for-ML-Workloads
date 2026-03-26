@@ -1,0 +1,205 @@
+# Triton Inference Server Model Configuration
+# ===========================================
+# 
+# This configuration enables production-grade serving of the GuardRail ONNX model
+# with optimized throughput, dynamic batching, and hardware acceleration.
+#
+# Key Engineering Decisions:
+# - ONNX Runtime backend with TensorRT execution provider for FP16 acceleration
+# - Dynamic batching with microsecond-level queue delays for latency optimization
+# - Multi-instance execution across GPU/CPU for load distribution
+# - Explicit tensor specifications prevent runtime shape mismatches
+#
+# Validation Command:
+#   tritonserver --model-repository=/path/to/model_repository --strict-model-config=true
+#
+# Performance Targets:
+#   - p99 latency: <10ms
+#   - Throughput: >1000 req/sec (with batch_size=16)
+#   - GPU memory: <2GB per instance
+
+name: "guardrail_model"
+platform: "onnxruntime_onnx"
+max_batch_size: 32
+
+# Input Tensor Specifications
+# ---------------------------
+# Explicit type and shape declarations prevent runtime errors and enable
+# Triton's automatic input validation.
+
+input [
+  {
+    name: "input_ids"
+    data_type: TYPE_INT64
+    dims: [ -1 ]  # Variable sequence length (up to 512)
+  },
+  {
+    name: "attention_mask"
+    data_type: TYPE_INT64
+    dims: [ -1 ]  # Matches input_ids shape
+  }
+]
+
+# Output Tensor Specifications
+# ----------------------------
+# Classification logits for 3 threat categories:
+# [none, prompt_injection, pii_detection]
+
+output [
+  {
+    name: "logits"
+    data_type: TYPE_FP32
+    dims: [ 3 ]  # num_labels
+  }
+]
+
+# Dynamic Batching Configuration
+# ------------------------------
+# Critical for achieving high throughput while maintaining low latency.
+# 
+# Strategy:
+# - Preferred batch sizes guide Triton to pack efficiently
+# - max_queue_delay_microseconds=1000 (1ms) balances latency vs throughput
+# - preserve_ordering=false enables out-of-order execution for better GPU utilization
+
+dynamic_batching {
+  preferred_batch_size: [ 1, 2, 4, 8, 16 ]
+  max_queue_delay_microseconds: 1000
+  preserve_ordering: false
+  priority_levels: 3
+  default_priority_level: 2
+  default_queue_policy {
+    timeout_action: REJECT
+    default_timeout_microseconds: 10000  # 10ms timeout
+    allow_timeout_override: false
+  }
+}
+
+# Instance Group Configuration
+# ----------------------------
+# Defines execution workers and hardware allocation.
+#
+# Production Setup (uncomment for GPU deployment):
+# - 2 GPU instances on device 0 for primary inference
+# - 1 CPU instance as fallback for overflow/degraded mode
+#
+# Development Setup (CPU-only):
+# - 4 CPU instances for parallel execution
+
+instance_group [
+  {
+    # GPU instances (uncomment for production with NVIDIA GPU)
+    # kind: KIND_GPU
+    # count: 2
+    # gpus: [ 0 ]
+    
+    # CPU instances (development/fallback)
+    kind: KIND_CPU
+    count: 4
+  }
+]
+
+# Optimization Configuration
+# --------------------------
+# ONNX Runtime specific optimizations and execution providers.
+
+optimization {
+  # Graph-level optimizations
+  graph {
+    level: 1  # Enable all safe optimizations
+  }
+  
+  # TensorRT Execution Provider (GPU acceleration)
+  # Uncomment for production GPU deployment
+  # execution_accelerators {
+  #   gpu_execution_accelerator [
+  #     {
+  #       name: "tensorrt"
+  #       parameters [
+  #         {
+  #           key: "precision_mode"
+  #           value: "FP16"  # Half-precision for 2x speedup
+  #         },
+  #         {
+  #           key: "max_workspace_size_bytes"
+  #           value: "1073741824"  # 1GB workspace
+  #         },
+  #         {
+  #           key: "max_cached_engines"
+  #           value: "10"
+  #         },
+  #         {
+  #           key: "trt_engine_cache_enable"
+  #           value: "1"
+  #         }
+  #       ]
+  #     }
+  #   ]
+  # }
+}
+
+# Model Warmup Configuration
+# --------------------------
+# Pre-compile execution graphs during model load to eliminate cold-start latency.
+
+model_warmup [
+  {
+    name: "warmup_batch_1"
+    batch_size: 1
+    inputs {
+      key: "input_ids"
+      value: {
+        data_type: TYPE_INT64
+        dims: [ 128 ]
+        zero_data: true
+      }
+    }
+    inputs {
+      key: "attention_mask"
+      value: {
+        data_type: TYPE_INT64
+        dims: [ 128 ]
+        zero_data: true
+      }
+    }
+  },
+  {
+    name: "warmup_batch_8"
+    batch_size: 8
+    inputs {
+      key: "input_ids"
+      value: {
+        data_type: TYPE_INT64
+        dims: [ 256 ]
+        zero_data: true
+      }
+    }
+    inputs {
+      key: "attention_mask"
+      value: {
+        data_type: TYPE_INT64
+        dims: [ 256 ]
+        zero_data: true
+      }
+    }
+  }
+]
+
+# Model Repository Structure
+# --------------------------
+# Expected directory layout:
+#
+# model_repository/
+# └── guardrail_model/
+#     ├── config.pbtxt (this file)
+#     ├── 1/
+#     │   └── model.onnx (exported ONNX model)
+#     └── 2/  (optional future version)
+#         └── model.onnx
+
+# Version Policy
+# --------------
+# Triton serves the highest numbered version by default.
+# For production, use explicit version control via model_version_policy.
+
+version_policy: { latest { num_versions: 1 } }

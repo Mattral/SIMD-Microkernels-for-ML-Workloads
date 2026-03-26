@@ -1,0 +1,346 @@
+# Flagger Canary Progressive Delivery for Triton Inference Server
+# ================================================================
+#
+# This Canary resource implements automated progressive delivery with:
+# - Gradual traffic shifting (5% increments every 1 minute)
+# - Prometheus metric validation gates
+# - Automatic rollback on SLA violation
+# - Zero-downtime model deployment
+#
+# Architecture:
+# 1. Flagger detects new Triton deployment version
+# 2. Creates canary pods with new model
+# 3. Shifts traffic incrementally: 5% → 10% → 15% → ... → 100%
+# 4. At each step, validates HTTP error rate and latency
+# 5. Promotes to primary if all checks pass, else rolls back
+#
+# Fail-Safe Mechanisms:
+# - Automatic rollback on metric threshold breach
+# - Traffic weights preserved during rollback
+# - Circuit breaker integration via fallback detection
+# - Webhook notifications on deployment state changes
+#
+# Author: Principal AI Infrastructure Architect
+
+apiVersion: flagger.app/v1beta1
+kind: Canary
+metadata:
+  name: triton-canary
+  namespace: guardrail-studio
+spec:
+  # Target deployment (Flagger manages this)
+  targetRef:
+    apiVersion: apps/v1
+    kind: Deployment
+    name: triton
+  
+  # Progressive delivery service
+  service:
+    # Service port configuration
+    port: 8001
+    targetPort: 8001
+    # Istio traffic management
+    gateways:
+      - triton-gateway
+    hosts:
+      - triton-service.guardrail-studio.svc.cluster.local
+    # Traffic policy
+    trafficPolicy:
+      tls:
+        mode: DISABLE
+  
+  # Analysis configuration
+  analysis:
+    # Interval between canary analysis runs
+    interval: 1m
+    
+    # Number of successful checks before promotion
+    threshold: 10
+    
+    # Max failed checks before rollback
+    maxWeight: 100
+    
+    # Traffic increment per interval
+    stepWeight: 5
+    
+    # Initial traffic weight to canary
+    stepWeightPromotion: 5
+    
+    # Prometheus metric checks (MANDATORY GATES)
+    metrics:
+      # Gate 1: HTTP 500 Error Rate < 1%
+      - name: request-success-rate
+        # PromQL query template
+        templateRef:
+          name: request-success-rate
+          namespace: guardrail-studio
+        # Minimum success rate threshold (99%)
+        thresholdRange:
+          min: 99
+        # Evaluation interval
+        interval: 1m
+      
+      # Gate 2: p99 Latency < 15ms
+      - name: request-duration-p99
+        templateRef:
+          name: request-duration-p99
+          namespace: guardrail-studio
+        # Maximum p99 latency in milliseconds
+        thresholdRange:
+          max: 15
+        interval: 1m
+      
+      # Gate 3: Request throughput (ensure canary handles load)
+      - name: request-throughput
+        templateRef:
+          name: request-throughput
+          namespace: guardrail-studio
+        # Minimum requests per second
+        thresholdRange:
+          min: 10
+        interval: 1m
+    
+    # Webhook notifications (optional)
+    webhooks:
+      # Pre-rollout validation
+      - name: pre-rollout
+        type: pre-rollout
+        url: http://guardrail-webhook-service/pre-rollout
+        timeout: 30s
+        metadata:
+          deployment: triton
+          namespace: guardrail-studio
+      
+      # Rollback notification
+      - name: rollback-notification
+        type: rollback
+        url: http://guardrail-webhook-service/rollback
+        timeout: 15s
+        metadata:
+          severity: critical
+          team: mlops
+      
+      # Promotion confirmation
+      - name: promotion-notification
+        type: confirm-promotion
+        url: http://guardrail-webhook-service/promotion
+        timeout: 15s
+        metadata:
+          model: triton
+          version: "{{ .Metadata.version }}"
+  
+  # Autoscaler configuration (inherit from HPA)
+  autoscalerRef:
+    apiVersion: autoscaling/v2
+    kind: HorizontalPodAutoscaler
+    name: triton-hpa
+
+---
+# Prometheus Metric Template: HTTP Success Rate
+apiVersion: flagger.app/v1beta1
+kind: MetricTemplate
+metadata:
+  name: request-success-rate
+  namespace: guardrail-studio
+spec:
+  provider:
+    type: prometheus
+    address: http://prometheus.monitoring:9090
+  query: |
+    sum(
+      rate(
+        istio_requests_total{
+          reporter="destination",
+          destination_workload_namespace="guardrail-studio",
+          destination_workload=~"triton-canary",
+          response_code!~"5.*"
+        }[1m]
+      )
+    )
+    /
+    sum(
+      rate(
+        istio_requests_total{
+          reporter="destination",
+          destination_workload_namespace="guardrail-studio",
+          destination_workload=~"triton-canary"
+        }[1m]
+      )
+    )
+    * 100
+
+---
+# Prometheus Metric Template: p99 Request Duration
+apiVersion: flagger.app/v1beta1
+kind: MetricTemplate
+metadata:
+  name: request-duration-p99
+  namespace: guardrail-studio
+spec:
+  provider:
+    type: prometheus
+    address: http://prometheus.monitoring:9090
+  query: |
+    histogram_quantile(
+      0.99,
+      sum(
+        rate(
+          istio_request_duration_milliseconds_bucket{
+            reporter="destination",
+            destination_workload_namespace="guardrail-studio",
+            destination_workload=~"triton-canary"
+          }[1m]
+        )
+      ) by (le)
+    )
+
+---
+# Prometheus Metric Template: Request Throughput
+apiVersion: flagger.app/v1beta1
+kind: MetricTemplate
+metadata:
+  name: request-throughput
+  namespace: guardrail-studio
+spec:
+  provider:
+    type: prometheus
+    address: http://prometheus.monitoring:9090
+  query: |
+    sum(
+      rate(
+        istio_requests_total{
+          reporter="destination",
+          destination_workload_namespace="guardrail-studio",
+          destination_workload=~"triton-canary"
+        }[1m]
+      )
+    )
+
+---
+# Istio Gateway for Triton Service
+apiVersion: networking.istio.io/v1beta1
+kind: Gateway
+metadata:
+  name: triton-gateway
+  namespace: guardrail-studio
+spec:
+  selector:
+    istio: ingressgateway
+  servers:
+    - port:
+        number: 8001
+        name: grpc
+        protocol: GRPC
+      hosts:
+        - "*"
+
+---
+# Istio VirtualService: Traffic Routing with Weight-Based Splitting
+apiVersion: networking.istio.io/v1beta1
+kind: VirtualService
+metadata:
+  name: triton-vs
+  namespace: guardrail-studio
+spec:
+  hosts:
+    - triton-service.guardrail-studio.svc.cluster.local
+  gateways:
+    - triton-gateway
+  http:
+    # Primary route with weight-based traffic splitting
+    - match:
+        - uri:
+            prefix: "/"
+      route:
+        # Primary (stable) deployment
+        - destination:
+            host: triton-service-primary.guardrail-studio.svc.cluster.local
+            port:
+              number: 8001
+          weight: 95  # Managed by Flagger
+        
+        # Canary (new version) deployment
+        - destination:
+            host: triton-service-canary.guardrail-studio.svc.cluster.local
+            port:
+              number: 8001
+          weight: 5   # Managed by Flagger (5% → 100%)
+      
+      # Request timeout for inference
+      timeout: 30s
+      
+      # Retry policy for transient failures
+      retries:
+        attempts: 3
+        perTryTimeout: 10s
+        retryOn: "5xx,reset,connect-failure,refused-stream"
+      
+      # Mirror traffic for shadow testing (optional)
+      # mirror:
+      #   host: triton-service-canary.guardrail-studio.svc.cluster.local
+      #   port:
+      #     number: 8001
+      # mirrorPercentage:
+      #   value: 10.0
+
+---
+# Istio DestinationRule: Load Balancing and Circuit Breaking
+apiVersion: networking.istio.io/v1beta1
+kind: DestinationRule
+metadata:
+  name: triton-dr
+  namespace: guardrail-studio
+spec:
+  host: triton-service.guardrail-studio.svc.cluster.local
+  
+  # Traffic policy for all versions
+  trafficPolicy:
+    # Load balancing strategy
+    loadBalancer:
+      consistentHash:
+        httpHeaderName: "x-request-id"  # Session affinity
+    
+    # Connection pool settings
+    connectionPool:
+      tcp:
+        maxConnections: 100
+        connectTimeout: 3s
+      http:
+        http2MaxRequests: 1000
+        maxRequestsPerConnection: 10
+    
+    # Circuit breaker (Istio-level, complements application circuit breaker)
+    outlierDetection:
+      consecutiveErrors: 5
+      interval: 30s
+      baseEjectionTime: 30s
+      maxEjectionPercent: 50
+      minHealthPercent: 50
+  
+  # Subset definitions (managed by Flagger)
+  subsets:
+    # Primary (stable) version
+    - name: primary
+      labels:
+        app: triton
+    
+    # Canary (new) version
+    - name: canary
+      labels:
+        app: triton
+
+---
+# ServiceMonitor: Expose Triton metrics to Prometheus
+apiVersion: monitoring.coreos.com/v1
+kind: ServiceMonitor
+metadata:
+  name: triton-metrics
+  namespace: guardrail-studio
+spec:
+  selector:
+    matchLabels:
+      app: triton
+  endpoints:
+    - port: metrics
+      interval: 15s
+      path: /metrics
