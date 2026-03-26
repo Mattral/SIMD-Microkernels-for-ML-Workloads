@@ -33,6 +33,11 @@
 #include <vector>
 #include <numeric>
 #include <cassert>
+#include <ctime>
+#include <time.h>
+#ifdef __linux__
+#  include <sched.h>
+#endif
 
 #include "kernels/cache_alloc.hpp"
 #include "kernels/avx_matmul.hpp"
@@ -44,20 +49,59 @@
 #  include <x86intrin.h>   // _rdtsc, __rdtscp, _mm_lfence, _mm_cpuid
 #  include <cpuid.h>
 
-static inline uint64_t tsc_start() {
-    // CPUID serialises the pipeline, then RDTSC reads the counter.
-    unsigned int lo, hi, a, b, c, d;
-    __cpuid(0, a, b, c, d);          // full serialisation
-    __asm__ volatile ("rdtsc" : "=a"(lo), "=d"(hi));
-    return ((uint64_t)hi << 32) | lo;
+static inline uint64_t rdtsc_start() {
+    _mm_lfence();                    // ensure prior loads complete before reading TSC
+    return __rdtsc();
 }
 
-static inline uint64_t tsc_stop() {
-    unsigned int lo, hi, aux;
-    __asm__ volatile ("rdtscp" : "=a"(lo), "=d"(hi), "=c"(aux));  // self-serialises
-    _mm_lfence();                    // prevent subsequent loads from bypassing RDTSCP
-    return ((uint64_t)hi << 32) | lo;
+static inline uint64_t rdtsc_end() {
+    unsigned int aux;
+    uint64_t t = __rdtscp(&aux);     // RDTSCP serialises prior instructions
+    _mm_lfence();                    // prevent later loads from bypassing the timestamp
+    return t;
 }
+
+static uint64_t calibrate_tsc_hz() {
+    // Warm up the CPU and enter a steady turbo state.
+    volatile double sink = 0.0;
+    for (int i = 0; i < 1000000; ++i) sink += i * 0.001;
+
+    timespec t0{}, t1{}, req{};
+    req.tv_sec = 0;
+    req.tv_nsec = 100000000L;  // 100 ms
+
+    uint64_t tsc0 = rdtsc_start();
+    if (clock_gettime(CLOCK_MONOTONIC, &t0) != 0) {
+        perror("clock_gettime");
+        return 0;
+    }
+    nanosleep(&req, nullptr);
+    uint64_t tsc1 = rdtsc_end();
+    if (clock_gettime(CLOCK_MONOTONIC, &t1) != 0) {
+        perror("clock_gettime");
+        return 0;
+    }
+
+    uint64_t ns_elapsed = static_cast<uint64_t>(t1.tv_sec - t0.tv_sec) * 1000000000ULL
+                        + static_cast<uint64_t>(t1.tv_nsec - t0.tv_nsec);
+    uint64_t tsc_elapsed = tsc1 - tsc0;
+    if (ns_elapsed == 0) return 0;
+    return static_cast<uint64_t>((static_cast<double>(tsc_elapsed) / ns_elapsed) * 1e9);
+}
+
+#ifdef __linux__
+static void pin_to_core(int core_id) {
+    cpu_set_t cpuset;
+    CPU_ZERO(&cpuset);
+    CPU_SET(core_id, &cpuset);
+    if (sched_setaffinity(0, sizeof(cpuset), &cpuset) != 0) {
+        perror("sched_setaffinity");
+        fprintf(stderr, "Warning: failed to pin to core %d\n", core_id);
+    }
+}
+#endif
+
+static double g_tsc_hz = 0.0;
 
 #elif defined(_MSC_VER)
 #  include <intrin.h>
@@ -93,9 +137,9 @@ static BenchResult measure(const char* name, Fn fn, long long flops,
 
     std::vector<uint64_t> cycles(reps);
     for (int i = 0; i < reps; ++i) {
-        uint64_t t0 = tsc_start();
+        uint64_t t0 = rdtsc_start();
         fn();
-        uint64_t t1 = tsc_stop();
+        uint64_t t1 = rdtsc_end();
         cycles[i] = t1 - t0;
     }
 
@@ -103,13 +147,18 @@ static BenchResult measure(const char* name, Fn fn, long long flops,
     double min_cy = static_cast<double>(cycles[0]);
     double med_cy = static_cast<double>(cycles[reps / 2]);
 
-    // Estimate clock frequency via calibration (see below)
-    // Using 3.5 GHz as a sensible default; RDTSC ticks at the nominal TSC rate.
-    constexpr double TSC_FREQ_GHZ = 3.5;
-    double gflops = static_cast<double>(flops) / (min_cy / TSC_FREQ_GHZ) * 1e-9;
+    double elapsed_sec = min_cy / g_tsc_hz;
+    double gflops = static_cast<double>(flops) / elapsed_sec * 1e-9;
+#if defined(__AVX512F__)
+    constexpr double PEAK_FP_PER_CYCLE = 32.0;
+#else
+    constexpr double PEAK_FP_PER_CYCLE = 16.0;
+#endif
+    double peak_gflops = (g_tsc_hz / 1e9) * PEAK_FP_PER_CYCLE;
+    double utilization = peak_gflops > 0.0 ? (gflops / peak_gflops) * 100.0 : 0.0;
 
-    printf("  %-30s | min: %10.0f cy | median: %10.0f cy | GFLOPS: %6.2f\n",
-           name, min_cy, med_cy, gflops);
+    printf("  %-30s | min: %10.0f cy | time: %8.3f ms | GFLOPS: %6.2f | util: %5.1f%%\n",
+           name, min_cy, elapsed_sec * 1000.0, gflops, utilization);
 
     return {min_cy, med_cy, gflops};
 }
@@ -296,8 +345,18 @@ int main() {
     printf("╔══════════════════════════════════════════════════╗\n");
     printf("║  SIMD-ML-Microkernels  ·  Cycle-Accurate Bench  ║\n");
     printf("╚══════════════════════════════════════════════════╝\n");
-    printf("  Measurement: RDTSC with CPUID/LFENCE serialisation\n");
+    printf("  Measurement: RDTSC with LFENCE/RDTSCP serialisation\n");
     printf("  Warmup: 3 reps · Measurement: 10 reps · Metric: min(cycles)\n");
+
+#ifdef __linux__
+    pin_to_core(0);
+#endif
+    g_tsc_hz = static_cast<double>(calibrate_tsc_hz());
+    if (g_tsc_hz == 0.0) {
+        fprintf(stderr, "Failed to calibrate TSC frequency; aborting.\n");
+        return 1;
+    }
+    printf("  Calibrated TSC frequency: %.3f GHz\n", g_tsc_hz / 1e9);
 
     bench_alignment();
     bench_gemm();

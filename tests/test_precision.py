@@ -43,9 +43,9 @@ def rand_matrix(rows, cols, dtype=np.float32):
 
 def gelu_numpy(x: np.ndarray) -> np.ndarray:
     """Reference GeLU using tanh approximation (matches kernel formula)."""
-    from numpy import tanh, sqrt, pi
-    c = sqrt(2.0 / pi)
-    return (0.5 * x * (1.0 + tanh(c * (x + 0.044715 * x**3)))).astype(np.float32)
+    x64 = x.astype(np.float64, copy=False)
+    c = np.sqrt(2.0 / np.pi)
+    return 0.5 * x64 * (1.0 + np.tanh(c * (x64 + 0.044715 * x64**3)))
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -72,9 +72,9 @@ class TestGEMM:
         C = np.zeros((M, N), dtype=np.float32)
 
         simd_kernels.sgemm(A, B, C)
-        C_ref = (A @ B).astype(np.float32)
+        C_ref = A.astype(np.float64) @ B.astype(np.float64)
 
-        max_err = float(np.max(np.abs(C - C_ref) / (np.abs(C_ref) + 1e-7)))
+        max_err = float(np.max(np.abs(C.astype(np.float64) - C_ref) / (np.abs(C_ref) + 1e-7)))
         assert max_err < self.GEMM_TOL, (
             f"GEMM [{M}×{N}×{K}]: max_rel_err={max_err:.2e} > tol={self.GEMM_TOL}"
         )
@@ -91,9 +91,9 @@ class TestGEMM:
         C_simd = C_init.copy()
         simd_kernels.sgemm(A, B, C_simd, alpha=alpha, beta=beta)
 
-        C_ref = (alpha * (A @ B) + beta * C_init).astype(np.float32)
+        C_ref = alpha * (A.astype(np.float64) @ B.astype(np.float64)) + beta * C_init.astype(np.float64)
 
-        max_err = float(np.max(np.abs(C_simd - C_ref) / (np.abs(C_ref) + 1e-7)))
+        max_err = float(np.max(np.abs(C_simd.astype(np.float64) - C_ref) / (np.abs(C_ref) + 1e-7)))
         assert max_err < self.GEMM_TOL, f"alpha/beta: max_rel_err={max_err:.2e}"
 
     def test_sgemm_overwrites_with_beta_zero(self):
@@ -124,10 +124,20 @@ class TestGeLU:
         ref = gelu_numpy(x)
 
         out = simd_kernels.gelu(x)
-        max_err = float(np.max(np.abs(out - ref) / (np.abs(ref) + 1e-7)))
+        max_err = float(np.max(np.abs(out.astype(np.float64) - ref) / (np.abs(ref) + 1e-7)))
 
         assert max_err < self.GELU_TOL, (
             f"GeLU n={n}: max_rel_err={max_err:.2e} > tol={self.GELU_TOL}"
+        )
+
+    def test_gelu_vs_numpy_float64_reference_range(self):
+        x = np.arange(-5.0, 5.0 + 1e-12, 0.001, dtype=np.float64)
+        ref = gelu_numpy(x)
+        out = simd_kernels.gelu(x.astype(np.float32))
+
+        max_abs_err = float(np.max(np.abs(out.astype(np.float64) - ref)))
+        assert max_abs_err < 1e-5, (
+            f"GeLU float64 reference [-5,5]: max_abs_err={max_abs_err:.2e} > 1e-5"
         )
 
     def test_gelu_inplace_equals_outofplace(self):

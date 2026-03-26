@@ -45,6 +45,7 @@
 
 #include <pybind11/pybind11.h>
 #include <pybind11/numpy.h>
+#include <cstdint>
 #include <stdexcept>
 #include <string>
 
@@ -58,16 +59,21 @@ namespace py = pybind11;
 
 static void check_float32(const py::array& arr, const char* name) {
     if (arr.dtype().kind() != 'f' || arr.dtype().itemsize() != 4) {
-        throw std::invalid_argument(
-            std::string(name) + " must be float32 (dtype=np.float32)");
+        throw std::runtime_error(std::string(name) + " must be float32 (dtype=np.float32)");
     }
 }
 
 static void check_contiguous(const py::array& arr, const char* name) {
-    if (!(arr.flags() & py::array::c_contiguous)) {
-        throw std::invalid_argument(
-            std::string(name) + " must be C-contiguous. Call np.ascontiguousarray() first.");
+    if (!arr.attr("flags").attr("c_contiguous").cast<bool>()) {
+        throw std::runtime_error(
+            std::string("Input array must be C-contiguous. ")
+            + "Call numpy.ascontiguousarray(arr) before passing.");
     }
+}
+
+static void validate_array(const py::array& arr, const char* name) {
+    check_float32(arr, name);
+    check_contiguous(arr, name);
 }
 
 // ─── Binding: sgemm ──────────────────────────────────────────────────────────
@@ -82,21 +88,18 @@ static void check_contiguous(const py::array& arr, const char* name) {
  *   alpha : float scalar (default 1.0)
  *   beta  : float scalar for C scaling (default 0.0 = overwrite)
  */
-static void py_sgemm(py::array_t<float, py::array::c_contiguous> A,
-                     py::array_t<float, py::array::c_contiguous> B,
-                     py::array_t<float, py::array::c_contiguous> C,
+static void py_sgemm(py::array A,
+                     py::array B,
+                     py::array C,
                      float alpha = 1.0f,
                      float beta  = 0.0f) {
-    check_float32(A, "A");
-    check_float32(B, "B");
-    check_float32(C, "C");
-    check_contiguous(A, "A");
-    check_contiguous(B, "B");
-    check_contiguous(C, "C");
+    validate_array(A, "A");
+    validate_array(B, "B");
+    validate_array(C, "C");
 
-    if (A.ndim() != 2) throw std::invalid_argument("A must be 2-D");
-    if (B.ndim() != 2) throw std::invalid_argument("B must be 2-D");
-    if (C.ndim() != 2) throw std::invalid_argument("C must be 2-D");
+    if (A.ndim() != 2) throw std::runtime_error("A must be 2-D");
+    if (B.ndim() != 2) throw std::runtime_error("B must be 2-D");
+    if (C.ndim() != 2) throw std::runtime_error("C must be 2-D");
 
     int M = static_cast<int>(A.shape(0));
     int K = static_cast<int>(A.shape(1));
@@ -105,17 +108,26 @@ static void py_sgemm(py::array_t<float, py::array::c_contiguous> A,
     if (B.shape(0) != K)
         throw std::invalid_argument("A.shape[1] must equal B.shape[0]");
     if (C.shape(0) != M || C.shape(1) != N)
-        throw std::invalid_argument("C must have shape [M, N]");
+        throw std::runtime_error("C must have shape [M, N]");
+
+    bool A_is_aligned = is_aligned(A.data(), 32);
+    bool B_is_aligned = is_aligned(B.data(), 32);
+    bool C_is_aligned = is_aligned(C.mutable_data(), 32);
+    if (!A_is_aligned || !B_is_aligned || !C_is_aligned) {
+        // Fall back to unaligned-safe kernels. The inner AVX2 path uses
+        // _mm256_loadu_ps/_mm256_storeu_ps where needed, so misaligned
+        // NumPy buffers do not crash with SIGBUS.
+    }
 
     // Release GIL during the (potentially long) GEMM computation
     {
         py::gil_scoped_release release;
         simd_sgemm(M, N, K,
                    alpha,
-                   A.data(), K,
-                   B.data(), N,
+                   static_cast<const float*>(A.data()), K,
+                   static_cast<const float*>(B.data()), N,
                    beta,
-                   C.mutable_data(), N);
+                   static_cast<float*>(C.mutable_data()), N);
     }
 }
 
@@ -127,13 +139,14 @@ static void py_sgemm(py::array_t<float, py::array::c_contiguous> A,
  * Args:
  *   x : np.ndarray (any shape), dtype float32, C-contiguous, writeable
  */
-static void py_gelu_inplace(py::array_t<float, py::array::c_contiguous> x) {
-    check_float32(x, "x");
-    check_contiguous(x, "x");
+static void py_gelu_inplace(py::array x) {
+    validate_array(x, "x");
+    x.request(true);  // ensure writable buffer
 
-    auto buf  = x.mutable_unchecked<>();
-    float* ptr = x.mutable_data();
+    float* ptr = static_cast<float*>(x.mutable_data());
     std::size_t n = static_cast<std::size_t>(x.size());
+    bool x_is_aligned = is_aligned(ptr, 32);
+    (void)x_is_aligned;  // kernel already handles misaligned loads safely
 
     {
         py::gil_scoped_release release;
@@ -146,15 +159,18 @@ static void py_gelu_inplace(py::array_t<float, py::array::c_contiguous> x) {
  * gelu(x) -> np.ndarray
  * Returns a new array GeLU(x). Allocates output.
  */
-static py::array_t<float> py_gelu(py::array_t<float, py::array::c_contiguous> x) {
-    check_float32(x, "x");
+static py::array_t<float> py_gelu(py::array x) {
+    validate_array(x, "x");
 
     std::size_t n = static_cast<std::size_t>(x.size());
-    py::array_t<float> out(x.request().shape);  // same shape as input
+    py::array_t<float> out(x.request().shape);
+
+    bool x_is_aligned = is_aligned(x.data(), 32);
+    (void)x_is_aligned;
 
     {
         py::gil_scoped_release release;
-        gelu_forward_avx2(x.data(), out.mutable_data(), n);
+        gelu_forward_avx2(static_cast<const float*>(x.data()), out.mutable_data(), n);
     }
     return out;
 }

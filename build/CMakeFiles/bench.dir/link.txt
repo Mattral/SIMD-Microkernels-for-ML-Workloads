@@ -1,0 +1,1 @@
+/usr/bin/c++ -O2 -g -DNDEBUG CMakeFiles/bench.dir/src/main_bench.cpp.o -o bench  libsimd_kernels_lib.a 

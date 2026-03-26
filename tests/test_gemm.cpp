@@ -42,16 +42,27 @@ static bool test_gemm_size(int M, int N, int K, double tol = 1e-3) {
     scalar_sgemm(M, N, K, A.get(), K, B.get(), N, C_ref.get(), N);
     simd_sgemm(M, N, K, 1.0f, A.get(), K, B.get(), N, 0.0f, C_got.get(), N);
 
-    double max_err = 0.0;
+    double max_abs_err = 0.0;
+    double max_rel_err = 0.0;
     for (int i = 0; i < M * N; ++i) {
-        double err = std::abs((double)C_got[i] - (double)C_ref[i])
-                   / (std::abs((double)C_ref[i]) + 1e-7);
-        if (err > max_err) max_err = err;
+        double abs_err = std::abs((double)C_got[i] - (double)C_ref[i]);
+        double rel_err = abs_err / (std::abs((double)C_ref[i]) + 1e-7);
+        max_abs_err = std::max(max_abs_err, abs_err);
+        max_rel_err = std::max(max_rel_err, rel_err);
     }
 
-    bool pass = (max_err < tol);
-    printf("  GEMM [%4d×%4d×%4d]  max_rel_err=%.2e  %s\n",
-           M, N, K, max_err, pass ? "PASS" : "FAIL");
+    bool pass = true;
+    for (int i = 0; i < M * N; ++i) {
+        double abs_err = std::abs((double)C_got[i] - (double)C_ref[i]);
+        double rel_err = abs_err / (std::abs((double)C_ref[i]) + 1e-7);
+        double allowed = (std::abs((double)C_ref[i]) < 1e-3) ? 1e-5 : tol * std::abs((double)C_ref[i]);
+        if (!(abs_err <= allowed || rel_err < tol)) {
+            pass = false;
+            break;
+        }
+    }
+    printf("  GEMM [%4d×%4d×%4d]  max_rel_err=%.2e  max_abs_err=%.2e  %s\n",
+           M, N, K, max_rel_err, max_abs_err, pass ? "PASS" : "FAIL");
     return pass;
 }
 

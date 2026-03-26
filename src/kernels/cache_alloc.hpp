@@ -22,6 +22,7 @@
 #include <cstddef>
 #include <cstdlib>
 #include <cstring>
+#include <cstdint>
 #include <memory>
 #include <new>
 #include <stdexcept>

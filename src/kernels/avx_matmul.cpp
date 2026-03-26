@@ -263,13 +263,22 @@ static void gemm_micro_6x16_avx2(int kc,
 static void pack_B(const float* B, int ldb,
                    int kc, int nc,
                    float* __restrict__ B_packed) {
-    for (int k = 0; k < kc; ++k) {
-        for (int n = 0; n < nc; ++n) {
-            B_packed[k * nc + n] = B[k * ldb + n];
-        }
-        // Pad remainder columns with zeros for register-width alignment
-        for (int n = nc; n < NR; ++n) {
-            B_packed[k * NR + n] = 0.0f;
+    const int num_blocks = (nc + NR - 1) / NR;
+    for (int block = 0; block < num_blocks; ++block) {
+        int jb = block * NR;
+        int actual_nr = std::min(NR, nc - jb);
+        float* dst_base = B_packed + block * kc * NR;
+
+        for (int k = 0; k < kc; ++k) {
+            const float* src = B + k * ldb + jb;
+            float* dst = dst_base + k * NR;
+
+            for (int n = 0; n < actual_nr; ++n) {
+                dst[n] = src[n];
+            }
+            for (int n = actual_nr; n < NR; ++n) {
+                dst[n] = 0.0f;
+            }
         }
     }
 }
@@ -280,13 +289,24 @@ static void pack_B(const float* B, int ldb,
  */
 static void pack_A(const float* A, int lda,
                    int mr, int kc,
-                   float* __restrict__ A_packed) {
-    for (int k = 0; k < kc; ++k) {
-        for (int m = 0; m < mr; ++m) {
-            A_packed[k * MR + m] = A[m * lda + k];
-        }
-        for (int m = mr; m < MR; ++m) {
-            A_packed[k * MR + m] = 0.0f;
+                   float* __restrict__ A_packed,
+                   float alpha = 1.0f) {
+    int num_blocks = (mr + MR - 1) / MR;
+    for (int block = 0; block < num_blocks; ++block) {
+        int rows = std::min(MR, mr - block * MR);
+        float* dst_base = A_packed + block * kc * MR;
+        const float* A_block = A + block * MR * lda;
+
+        for (int k = 0; k < kc; ++k) {
+            const float* src = A_block + k;
+            float* dst = dst_base + k * MR;
+
+            for (int m = 0; m < rows; ++m) {
+                dst[m] = alpha * src[m * lda];
+            }
+            for (int m = rows; m < MR; ++m) {
+                dst[m] = 0.0f;
+            }
         }
     }
 }
@@ -322,8 +342,8 @@ void simd_sgemm(int M, int N, int K,
     }
 
     // Allocate packing buffers (L2-resident)
-    auto A_pack = make_aligned_array<float>(MC * KC);
-    auto B_pack = make_aligned_array<float>(KC * NC);
+    auto A_pack = make_aligned_array<float>(((MC + MR - 1) / MR) * KC * MR);
+    auto B_pack = make_aligned_array<float>(((NC + NR - 1) / NR) * KC * NR);
 
     // 3-level tiled loop: N-tile → K-tile → M-tile → micro-kernel
     for (int j = 0; j < N; j += NC) {
@@ -338,8 +358,9 @@ void simd_sgemm(int M, int N, int K,
             for (int i = 0; i < M; i += MC) {
                 int mc = std::min(MC, M - i);
 
-                // Pack A panel
-                pack_A(A + i * lda + k, lda, mc, kc, A_pack.get());
+                // Pack A panel. Pack alpha-scaled A values so the inner kernel
+                // can accumulate alpha * A * B directly into C.
+                pack_A(A + i * lda + k, lda, mc, kc, A_pack.get(), alpha);
 
                 // Micro-kernel loop over the MC × NC tile.
                 // pack_A stores in column-major micro-panel order:
@@ -353,27 +374,36 @@ void simd_sgemm(int M, int N, int K,
                     // Each prior MR block occupies kc * MR floats.
                     const float* A_micro = A_pack.get() + (ii / MR) * (kc * MR);
                     for (int jj = 0; jj < nc; jj += NR) {
+                        int nr = std::min(NR, nc - jj);
+                        if (mr == MR && nr == NR) {
+                            int block = jj / NR;
+                            float* B_block = B_pack.get() + block * kc * NR;
 #ifdef __AVX2__
-                        gemm_micro_6x16_avx2(
-                            kc,
-                            A_micro,
-                            B_pack.get() + jj,
-                            C + (i + ii) * ldc + (j + jj),
-                            ldc
-                        );
+                            gemm_micro_6x16_avx2(
+                                kc,
+                                A_micro,
+                                B_block,
+                                C + (i + ii) * ldc + (j + jj),
+                                ldc
+                            );
+#else
+                            scalar_sgemm(MR, NR, kc,
+                                         A + (i + ii) * lda + k, lda,
+                                         B + k * ldb + (j + jj), ldb,
+                                         C + (i + ii) * ldc + (j + jj), ldc);
 #endif
+                        } else {
+                            scalar_sgemm(mr, nr, kc,
+                                         A + (i + ii) * lda + k, lda,
+                                         B + k * ldb + (j + jj), ldb,
+                                         C + (i + ii) * ldc + (j + jj), ldc);
+                        }
                     }
                 }
             }
         }
     }
 
-    // Apply alpha scalar
-    if (alpha != 1.0f) {
-        for (int i = 0; i < M; ++i)
-            for (int j = 0; j < N; ++j)
-                C[i * ldc + j] *= alpha;
-    }
 }
 
 // ─── Simple reference (scalar) GEMM — used by benchmark for comparison ───────

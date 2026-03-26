@@ -1,0 +1,11 @@
+/workspaces/SIMD-Microkernels-for-ML-Workloads/build/CMakeFiles/simd_kernels_lib.dir
+/workspaces/SIMD-Microkernels-for-ML-Workloads/build/CMakeFiles/simd_kernels.dir
+/workspaces/SIMD-Microkernels-for-ML-Workloads/build/CMakeFiles/bench.dir
+/workspaces/SIMD-Microkernels-for-ML-Workloads/build/CMakeFiles/test.dir
+/workspaces/SIMD-Microkernels-for-ML-Workloads/build/CMakeFiles/edit_cache.dir
+/workspaces/SIMD-Microkernels-for-ML-Workloads/build/CMakeFiles/rebuild_cache.dir
+/workspaces/SIMD-Microkernels-for-ML-Workloads/build/tests/CMakeFiles/simd_kernels_precision_lib.dir
+/workspaces/SIMD-Microkernels-for-ML-Workloads/build/tests/CMakeFiles/simd_tests.dir
+/workspaces/SIMD-Microkernels-for-ML-Workloads/build/tests/CMakeFiles/test.dir
+/workspaces/SIMD-Microkernels-for-ML-Workloads/build/tests/CMakeFiles/edit_cache.dir
+/workspaces/SIMD-Microkernels-for-ML-Workloads/build/tests/CMakeFiles/rebuild_cache.dir
