@@ -1,10 +1,13 @@
 """Guardrail service with pluggable strategies (Strategy pattern)."""
-from typing import Dict, Any, List
+import asyncio
+import hashlib
+from typing import Dict, Any, List, Optional
 import uuid
 import time
 
 from src.services.inference_client import inference_client
 from src.db.qdrant import qdrant_manager
+from src.repositories.telemetry_repo import telemetry_repo
 from src.schemas.firewall import (
     GuardrailCheckRequest,
     GuardrailCheckResponse,
@@ -35,6 +38,10 @@ class GuardrailService:
     ) -> GuardrailCheckResponse:
         """Perform comprehensive guardrail check on input text.
         
+        CRITICAL PATH: Only inference blocks the response. Qdrant enrichment
+        and telemetry logging are fire-and-forget background tasks (asyncio.ensure_future).
+        This ensures p99 latency stays ≤ 10ms at the FastAPI boundary.
+        
         Args:
             request: Guardrail check request
             
@@ -57,7 +64,7 @@ class GuardrailService:
         )
         
         try:
-            # Step 1: Run ML inference
+            # CRITICAL PATH: Only ML inference blocks the response
             inference_result = await inference_client.infer(
                 text=request.text,
                 return_embeddings=True
@@ -68,16 +75,7 @@ class GuardrailService:
             confidence = inference_result["confidence"]
             embeddings = inference_result["embeddings"]
             
-            # Step 2: Check against vector database for similar historical threats
-            similar_threats = []
-            if threat_detected and embeddings:
-                similar_threats = qdrant_manager.search_similar_threats(
-                    query_vector=embeddings,
-                    limit=3,
-                    score_threshold=0.7
-                )
-            
-            # Step 3: Apply threshold-based blocking policy
+            # Apply threshold-based blocking policy
             threat_type = ThreatType(threat_type_str)
             threshold = self.thresholds.get(threat_type, 0.9)
             blocked = threat_detected and confidence >= threshold
@@ -101,25 +99,40 @@ class GuardrailService:
             
             total_latency = (time.perf_counter() - start_time) * 1000
             
-            logger.info(
-                f"Guardrail check completed",
-                extra={
-                    "request_id": request_id,
-                    "blocked": blocked,
-                    "threat_detected": threat_detected,
-                    "confidence": confidence,
-                    "total_latency_ms": total_latency
-                }
-            )
-            
-            return GuardrailCheckResponse(
+            # Build response immediately — do NOT wait for Qdrant or telemetry
+            response = GuardrailCheckResponse(
                 request_id=request_id,
                 passed=passed,
                 blocked=blocked,
                 classification=classification,
                 message=message,
-                similar_threats=similar_threats if similar_threats else None
+                similar_threats=None  # Will be populated asynchronously
             )
+            
+            # BACKGROUND TASK (fire-and-forget): Qdrant enrichment + telemetry logging
+            # Never awaited by caller — latency isolated from hot path
+            asyncio.ensure_future(
+                self._enrich_and_log(
+                    text=request.text,
+                    request_id=request_id,
+                    inference_result=inference_result,
+                    response=response,
+                    threat_detected=threat_detected
+                )
+            )
+            
+            logger.info(
+                f"Guardrail check completed (hot path only)",
+                extra={
+                    "request_id": request_id,
+                    "blocked": blocked,
+                    "threat_detected": threat_detected,
+                    "confidence": confidence,
+                    "hot_path_latency_ms": total_latency
+                }
+            )
+            
+            return response
             
         except Exception as e:
             logger.error(
@@ -131,6 +144,63 @@ class GuardrailService:
                 f"Guardrail check failed: {str(e)}",
                 details={"request_id": request_id}
             )
+    
+    async def _enrich_and_log(
+        self,
+        text: str,
+        request_id: str,
+        inference_result: Dict[str, Any],
+        response: GuardrailCheckResponse,
+        threat_detected: bool,
+    ) -> None:
+        """Background enrichment: ANN lookup + telemetry. Never awaited by caller.
+        
+        This task runs asynchronously and NEVER blocks the hot path. If it takes
+        200ms or times out, the client has already received their response.
+        """
+        try:
+            # ANN search for similar historical threats (only if threat detected)
+            similar_threat_ids: List[str] = []
+            if threat_detected and inference_result.get("embeddings"):
+                similar_threats = qdrant_manager.search_similar_threats(
+                    query_vector=inference_result["embeddings"],
+                    limit=3,
+                    score_threshold=0.7
+                )
+                similar_threat_ids = [t.get("id") for t in similar_threats if t.get("id")]
+            
+            # Log telemetry (hash the text, never store plaintext in telemetry)
+            text_hash = hashlib.sha256(text.encode()).hexdigest()
+            await telemetry_repo.log(
+                request_id=request_id,
+                text_hash=text_hash,
+                threat_detected=threat_detected,
+                confidence=inference_result.get("confidence", 0),
+                threat_type=inference_result.get("threat_type"),
+                blocked=response.blocked,
+                similar_threat_ids=similar_threat_ids,
+            )
+            
+            logger.debug(
+                "Background enrichment completed",
+                extra={
+                    "request_id": request_id,
+                    "similar_threats_count": len(similar_threat_ids)
+                }
+            )
+        except Exception as exc:  # noqa: BLE001
+            # Background task failure must never bubble up to client
+            logger.warning(
+                "Background enrichment failed",
+                extra={"request_id": request_id, "error": str(exc)},
+                exc_info=exc
+            )
+
+
+# Global guardrail service instance
+guardrail_service = GuardrailService()
+
+
 
 
 # Global guardrail service instance

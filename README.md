@@ -7,11 +7,10 @@
 *Built to defend planet-scale LLM systems against prompt injection, PII leakage,
 data poisoning, and model drift — at sub-10 millisecond p99 latency.*
 
-[![CI Pipeline](https://img.shields.io/badge/CI-passing-success?logo=github)](./.github/workflows/ci_cd.yaml)
-[![Coverage](https://img.shields.io/badge/coverage-≥90%25-brightgreen)](./.github/workflows/ci_cd.yaml)
-[![Latency p99](https://img.shields.io/badge/latency_p99-8.7ms-blue)](./docs/SYSTEM_DESIGN.md#32-latency-budget-allocation)
-[![Throughput](https://img.shields.io/badge/throughput-25k_RPS%2Fpod-blue)](./docs/SYSTEM_DESIGN.md#10-capacity--scaling-model)
-[![Uptime SLA](https://img.shields.io/badge/SLA-99.99%25-success)](./docs/SYSTEM_DESIGN.md#11-failure-mode--effects-analysis-fmea-abridged)
+[![CI Pipeline](https://github.com/Mattral/GuardRail-Studio/actions/workflows/ci_cd.yaml/badge.svg)](https://github.com/Mattral/GuardRail-Studio/actions/workflows/ci_cd.yaml)
+[![Coverage](https://codecov.io/gh/Mattral/GuardRail-Studio/branch/main/graph/badge.svg)](https://codecov.io/gh/Mattral/GuardRail-Studio)
+[![Latency p99](https://img.shields.io/badge/latency_p99-design_target_≤10ms-lightgrey)](#performance-targets)
+[![Throughput](https://img.shields.io/badge/throughput-design_target_≥20k_RPS-lightgrey)](#performance-targets)
 [![Type Coverage](https://img.shields.io/badge/mypy-strict-blue)](./docs/CONTRIBUTING.md#4-quality-gates)
 [![License](https://img.shields.io/badge/license-Apache_2.0-lightgrey)](./LICENSE)
 
@@ -157,26 +156,29 @@ For the full local → cloud journey, jump to
 
 ---
 
-## 📊 Enterprise Maturity Matrix
+## 📊 Performance Targets & Measurement Status
 
-| Pillar | Metric | Target | Achieved | Evidence |
+> **Honest disclosure:** The targets below are *engineering design goals*
+> derived from architecture decisions and component SLAs.
+> **Measured values will be published in `docs/BENCHMARKS.md` after
+> hardware validation on the reference EKS cluster.**
+> See [docs/SYSTEM_DESIGN.md](docs/SYSTEM_DESIGN.md#32-latency-budget-allocation) for the latency budget derivation.
+
+| Pillar | Metric | Design Target | Measurement Status | How We'll Verify |
 | --- | --- | ---:| ---:| --- |
-| **Latency** | p50 inline check | ≤ 5 ms | 4.1 ms | [`tests/load_testing/k6_chaos_test.js`](./tests/load_testing/k6_chaos_test.js) |
-| | p95 inline check | ≤ 8 ms | 7.8 ms | k6 chaos surge |
-| | p99 inline check | ≤ 10 ms | 8.7 ms | k6 + Grafana SLO board |
-| **Throughput** | Sustained RPS / pod | ≥ 20k | 25k | k6 load tests |
-| | Burst RPS / pod | ≥ 35k | 40k | chaos test |
-| **Availability** | Monthly SLA | 99.99% | 99.998% | Grafana SLO burn-rate |
-| **Quality** | Test coverage | ≥ 90% | 92% | [`ci_cd.yaml`](./.github/workflows/ci_cd.yaml) |
-| | mypy strict | 100% | 100% | CI lane |
-| | CRITICAL CVEs | 0 | 0 | Trivy CI lane |
-| **ML Integrity** | PyTorch ↔ ONNX max diff | < 1e-5 | 3.9e-7 | [`tests/ml/test_model_parity.py`](./tests/ml/test_model_parity.py) |
-| **Adaptability** | Drift → retrain → canary | < 30 min | ~22 min | Airflow DAG run history |
-| **Parameter Efficiency** | LoRA adapter size vs base | ≤ 2% | 1.6% | W&B artifact lineage |
-| **Security** | Secrets in repo | 0 | 0 | pre-commit + Trivy |
-| | Pods with wildcard IAM | 0 | 0 | Terraform audit |
-| **Observability** | Endpoints with traces | 100% | 100% | [`backend/src/core/observability.py`](./backend/src/core/observability.py) |
-| | Endpoints with metrics | 100% | 100% | Prometheus catalogue |
+| **Latency** | p50 inline check | ≤ 5 ms | ⏳ Pending hardware run | k6 against EKS cluster |
+| | p95 inline check | ≤ 8 ms | ⏳ Pending | k6 sustained load |
+| | p99 inline check | ≤ 10 ms | ⏳ Pending | k6 + Grafana SLO |
+| **Throughput** | Sustained RPS/pod | ≥ 20k | ⏳ Pending | k6 constant-rate test |
+| | Burst RPS/pod | ≥ 35k | ⏳ Pending | k6 ramping-arrival-rate |
+| **Quality** | Test coverage | ≥ 90% | ✅ Enforced in CI | pytest-cov gate |
+| | mypy strict | 100% | ✅ Enforced in CI | CI lane |
+| | CRITICAL CVEs | 0 | ✅ Enforced in CI | Trivy gate (blocking) |
+| **ML Integrity** | PyTorch ↔ ONNX max diff | < 1e-5 | ✅ Enforced in CI | test_model_parity.py |
+| **Adaptability** | Drift → retrain → canary | < 30 min | ⏳ Pending | Airflow DAG e2e test |
+| **Parameter Efficiency** | LoRA adapter size vs base | ≤ 2% | ✅ Design verified | peft/LoRA config |
+| **Secrets in repo** | Secrets exposed | 0 | ✅ Enforced in CI | Trivy + pre-commit |
+| **IAM Coverage** | Pods with wildcard IAM | 0 | ✅ Enforced in Terraform | policy audit lane |
 
 ---
 
