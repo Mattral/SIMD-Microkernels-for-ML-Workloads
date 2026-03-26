@@ -31,9 +31,21 @@ dist/
 dist
 
 # Environment files (comprehensive coverage)
+.env
+.env.*
+!.env.example
+*.env
 
 *token.json*
 *credentials.json*
+
+# Agent scaffolding artifacts
+design_guidelines.json
+test_result.md
+memory/
+.emergent/
+*.pid
+pid.txt
 
 # Logs and debug files
 npm-debug.log*
@@ -51,6 +63,10 @@ __pycache__/
 *pyc*
 venv/
 .venv/
+.coverage
+htmlcov/
+.mypy_cache/
+.ruff_cache/
 
 # Development tools
 chainlit.md
@@ -75,6 +91,9 @@ agenthub/agents/youtube/db
 
 # Build caches
 .cache/
+
+# k6 results
+tests/load_testing/results/
 
 memory/test_credentials.md
 

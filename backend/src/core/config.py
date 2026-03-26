@@ -32,6 +32,12 @@ class Settings(BaseSettings):
         default="distilroberta_guardrail",
         description="Model name in Triton model repository"
     )
+    triton_pool_size: int = Field(
+        default=4,
+        ge=1,
+        le=16,
+        description="Number of gRPC channels in Triton connection pool (for HTTP/2 multiplexing)"
+    )
     
     # Guardrail Thresholds
     prompt_injection_threshold: float = Field(
@@ -74,6 +80,16 @@ class Settings(BaseSettings):
         description="W&B project name"
     )
     wandb_entity: str = Field(default="", description="W&B entity/team name")
+    
+    # Redis Cache Configuration
+    redis_url: str = Field(
+        default="redis://localhost:6379/0",
+        description="Redis connection URL for prompt classification cache"
+    )
+    cache_ttl_seconds: int = Field(
+        default=5,
+        description="Cache TTL in seconds for repeated prompt classifications"
+    )
     
     # Logging Configuration
     log_level: str = Field(default="INFO", description="Logging level")

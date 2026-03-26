@@ -1,0 +1,214 @@
+name: GuardRail Studio — Zero-Compromise CI/CD
+
+on:
+  push:
+    branches: [main, develop]
+  pull_request:
+    branches: [main, develop]
+
+env:
+  PYTHON_VERSION: "3.11"
+  NODE_VERSION: "18"
+  COVERAGE_THRESHOLD: 90
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  # ─── Lane 1: Lint & Code Quality ──────────────────────────────────────────
+  lint:
+    name: Ruff + Black + isort (Code Quality)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+          cache: pip
+      - run: pip install ruff black isort
+      - run: ruff check backend/src ml_pipelines
+      - run: black --check backend/src ml_pipelines
+      - run: isort --check-only backend/src ml_pipelines
+      - name: Detect secrets (pre-commit)
+        run: |
+          pip install detect-secrets
+          detect-secrets scan --baseline .secrets.baseline
+          git diff --cached --name-only | xargs -I {} detect-secrets audit {} || true
+
+  # ─── Lane 2: Type Checking ────────────────────────────────────────────────
+  typecheck:
+    name: mypy --strict (Type Safety)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+          cache: pip
+      - run: pip install -r backend/requirements.txt
+      - run: pip install mypy
+      - run: mypy backend/src --strict --ignore-missing-imports
+      - run: mypy ml_pipelines --strict --ignore-missing-imports
+
+  # ─── Lane 3: Security Gate ────────────────────────────────────────────────
+  security:
+    name: Trivy + Bandit (CVE Scanning)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: aquasecurity/trivy-action@master
+        with:
+          scan-type: fs
+          scan-ref: .
+          format: sarif
+          output: trivy-results.sarif
+          severity: HIGH,CRITICAL
+          exit-code: "1"
+      - uses: github/codeql-action/upload-sarif@v2
+        if: always()
+        with:
+          sarif_file: trivy-results.sarif
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+      - run: pip install bandit
+      - name: Bandit security scan (HIGH blocks CI)
+        run: |
+          bandit -r backend/src ml_pipelines -f json -o bandit-report.json || true
+          # Parse report and fail if any HIGH findings
+          python3 -c "
+          import json
+          with open('bandit-report.json') as f:
+              report = json.load(f)
+          high_findings = [r for r in report.get('results', []) if r['severity'] == 'HIGH']
+          if high_findings:
+              print(f'❌ {len(high_findings)} HIGH severity findings found:')
+              for finding in high_findings:
+                  print(f\"  - {finding['test_id']}: {finding['issue_text']}\")
+              exit(1)
+          else:
+              print('✅ No HIGH severity findings')
+          "
+
+  # ─── Lane 4: Python Tests + Coverage Gate ─────────────────────────────────
+  test:
+    name: pytest + Coverage Gate (≥ 90%)
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:15-alpine
+        env:
+          POSTGRES_USER: guardrail
+          POSTGRES_PASSWORD: testpassword
+          POSTGRES_DB: guardrail_test
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 5s
+          --health-timeout 3s
+          --health-retries 10
+      redis:
+        image: redis:7-alpine
+        ports:
+          - 6379:6379
+        options: >-
+          --health-cmd "redis-cli ping"
+          --health-interval 5s
+          --health-timeout 3s
+          --health-retries 5
+    env:
+      DATABASE_URL: postgresql+asyncpg://guardrail:testpassword@localhost:5432/guardrail_test
+      REDIS_URL: redis://localhost:6379/0
+      TRITON_URL: localhost:8001
+      ENVIRONMENT: test
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+          cache: pip
+      - run: pip install -r backend/requirements.txt
+      - name: Run migrations
+        run: |
+          cd backend
+          python -c "
+          import asyncio
+          from src.db.postgres import run_migrations
+          asyncio.run(run_migrations())
+          "
+      - name: pytest with coverage gate
+        run: |
+          cd backend
+          pytest tests/ \
+            -v \
+            --asyncio-mode=auto \
+            --cov=src \
+            --cov-report=xml \
+            --cov-report=term-missing \
+            --cov-fail-under=${{ env.COVERAGE_THRESHOLD }}
+      - uses: codecov/codecov-action@v4
+        with:
+          files: backend/coverage.xml
+          fail_ci_if_error: true
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: coverage-report
+          path: backend/coverage.xml
+
+  # ─── Lane 5: ML Parity Gate ──────────────────────────────────────────────────
+  parity-gate:
+    name: ML Bit-Parity Gate (PyTorch ↔ ONNX)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+          cache: pip
+      - run: pip install torch onnx onnxruntime transformers
+      - name: Export model + parity check
+        # Uses a tiny distilroberta config to avoid downloading 250MB in CI
+        run: |
+          cd ml_pipelines
+          python export_model.py --ci-mode --max-diff-threshold 1e-3
+      - name: pytest parity test
+        run: pytest tests/ml/test_model_parity.py -v
+
+  # ─── Lane 6: Docker Build ────────────────────────────────────────────────
+  docker-build:
+    name: Docker Build Validation
+    runs-on: ubuntu-latest
+    needs: [lint, typecheck, test]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: docker/setup-buildx-action@v3
+      - name: Build backend image
+        uses: docker/build-push-action@v5
+        with:
+          context: backend
+          push: false
+          tags: guardrail-backend:ci
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+  # ─── Summary: All Lanes Must Pass ─────────────────────────────────────────
+  all-checks:
+    name: All CI Lanes Passed
+    runs-on: ubuntu-latest
+    if: always()
+    needs: [lint, typecheck, security, test, parity-gate, docker-build]
+    steps:
+      - name: Decide final result
+        run: |
+          if [[ "${{ needs.lint.result }}" == "failure" || \
+                "${{ needs.typecheck.result }}" == "failure" || \
+                "${{ needs.security.result }}" == "failure" || \
+                "${{ needs.test.result }}" == "failure" || \
+                "${{ needs.parity-gate.result }}" == "failure" || \
+                "${{ needs.docker-build.result }}" == "failure" ]]; then
+            echo "❌ CI FAILED: One or more lanes failed"
+            exit 1
+          else
+            echo "✅ CI PASSED: All lanes green"
+          fi

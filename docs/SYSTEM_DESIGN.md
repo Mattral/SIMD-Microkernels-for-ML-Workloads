@@ -150,23 +150,57 @@ Client          Istio Gateway     FastAPI Pod       Triton Pod      Qdrant
   │                  │◀── 200 + JSON ──│                │              │
   │◀── 200 + JSON ───│                 │                │              │
   │                                                                    │
-  │  TOTAL BUDGET: 10 ms p99 (8 ms inference, 2 ms transport+aux)      │
+  │  BUDGET TARGET: p99 ≤ 10 ms at FastAPI boundary (without cache)    │
 ```
 
 ### 3.2 Latency Budget Allocation
 
-| Stage | Budget | Notes |
+The p99 ≤ 10ms target applies to the **FastAPI process boundary** —
+from when the request is received by the ASGI server to when the response
+is written to the socket. It does NOT include AWS WAF inspection or
+Istio sidecar overhead, which add 2–5ms outside our control.
+
+**Qdrant ANN search and telemetry logging are NOT in the hot path** — they are
+background tasks that begin after the response is sent to the client.
+
+#### 3.2.1 Hot Path Budget (FastAPI boundary, no cache hit)
+
+| Component | Budget | Notes |
 | --- | ---:| --- |
-| Istio mTLS + JWT validate | 0.5 ms | LDS/RDS cached, JWKS pre-warmed |
-| FastAPI request parse | 0.2 ms | `orjson`, no Pydantic v1 nesting |
-| HF fast tokenisation | 0.8 ms | Rust-backed, batch-friendly |
-| gRPC marshal (protobuf) | 0.3 ms | binary, no JSON |
-| Triton dynamic batching wait | ≤ 2.0 ms | `max_queue_delay_microseconds = 2000` |
-| ONNX Runtime exec | 3.5 ms | INT8 quantised, OpenVINO EP |
-| gRPC unmarshal + softmax | 0.4 ms | NumPy, vectorised |
-| Qdrant ANN (top-3) | 1.0 ms | HNSW M=16, ef=64 |
-| Response serialise | 0.3 ms | `orjson` |
-| **Total p99 target** | **≤ 10 ms** | hard SLO |
+| FastAPI middleware stack | 0.3 ms | OTel span creation, JWT validation |
+| Redis cache lookup | 0.3 ms | Single GET; fails open on timeout |
+| gRPC serialization to Triton | 0.3 ms | protobuf encode + channel send |
+| Triton queue wait | ≤ 1.0 ms | max_queue_delay_microseconds=1000 |
+| DistilRoBERTa FP16 inference | 2–4 ms | A100 GPU; 128-token sequence |
+| gRPC response parse | 0.2 ms | protobuf decode + softmax |
+| Response serialization | 0.1 ms | orjson dump |
+| **Total (no cache)** | **4.2–6.2 ms** | p50 target |
+| **p99 headroom** | **+3–4 ms** | Queuing + GC + scheduling jitter |
+| **p99 estimate** | **~9–10 ms** | At moderate load on GPU |
+
+#### 3.2.2 Cache Hit Budget (Redis hit)
+
+| Component | Budget |
+| --- | ---:|
+| FastAPI middleware | 0.3 ms |
+| Redis GET | 0.3 ms |
+| Response serialization | 0.1 ms |
+| **Total** | **~0.7 ms** |
+
+**Cache hit rate target:** 5–10% at 20k+ RPS (conservative, adversarial scanners retry identical payloads).
+
+#### 3.2.3 Outside Our Latency Budget (Infrastructure Layer)
+
+These components are beyond guardrail-service's control:
+
+- **AWS WAF:** +1–3 ms (packet inspection + geo-blocking)
+- **Istio mTLS sidecar pair:** +1–2 ms (mutual TLS handshake, request routing)
+- **NLB SSL/TLS termination:** +0.5–1 ms
+- **End-to-end p99 (client perspective):** ~**12–15 ms**
+
+**This is honest:** A transparent inline firewall with WAF + service mesh
+cannot achieve single-digit p99 latency from the client's perspective.
+The 10ms budget is achievable at the application layer only.
 
 ---
 

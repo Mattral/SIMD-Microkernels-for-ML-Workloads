@@ -17,6 +17,7 @@ Author: Principal MLOps Engineer
 """
 
 import asyncio
+import itertools
 import time
 import re
 from typing import Dict, Any, List, Optional, Tuple
@@ -36,6 +37,7 @@ from src.core.config import settings
 from src.core.logging import get_logger
 from src.core.exceptions import InferenceException
 from src.schemas.firewall import ThreatType
+from src.services.triton_channel_pool import _TritonChannelPool
 
 logger = get_logger(__name__)
 
@@ -71,7 +73,7 @@ class ProductionInferenceClient:
         return cls._instance
     
     def __init__(self):
-        """Initialize Triton client with connection pooling."""
+        """Initialize Triton client with multi-channel connection pool."""
         # Prevent re-initialization
         if hasattr(self, '_initialized'):
             return
@@ -81,8 +83,8 @@ class ProductionInferenceClient:
         self.model_name = settings.triton_model_name
         self.max_seq_length = 512
         
-        # gRPC client (will be initialized lazily)
-        self._grpc_client: Optional[grpcclient.InferenceServerClient] = None
+        # Multi-channel gRPC connection pool (for HTTP/2 multiplexing)
+        self._channel_pool: Optional[_TritonChannelPool] = None
         
         # Circuit breaker state
         self._circuit_state = CircuitState.CLOSED
@@ -104,14 +106,14 @@ class ProductionInferenceClient:
             extra={
                 "triton_url": self.triton_url,
                 "model_name": self.model_name,
+                "triton_pool_size": settings.triton_pool_size,
                 "triton_available": TRITON_AVAILABLE
             }
         )
     
-    async def initialize(self) -> None:
-        """Initialize Triton gRPC connection and tokenizer.
+    async def initialize(self) -> Nhannel pool and tokenizer.
         
-        This method establishes the gRPC channel and loads the tokenizer.
+        This method establishes the multi-channel gRPC pool and loads the tokenizer.
         It's safe to call multiple times (idempotent).
         """
         if not TRITON_AVAILABLE:
@@ -121,32 +123,56 @@ class ProductionInferenceClient:
             return
         
         try:
-            # Initialize gRPC client with connection pooling
-            if self._grpc_client is None:
-                self._grpc_client = grpcclient.InferenceServerClient(
+            # Initialize multi-channel pool
+            if self._channel_pool is None:
+                self._channel_pool = _TritonChannelPool(
                     url=self.triton_url,
-                    verbose=False,
-                    ssl=False  # Enable for production with TLS
+                    pool_size=settings.triton_pool_size
                 )
+                await self._channel_pool.initialize()
                 
-                # Verify server is live
-                is_live = await self._grpc_client.is_server_live()
-                if not is_live:
-                    raise InferenceException(
-                        "Triton server is not live",
-                        details={"url": self.triton_url}
-                    )
-                
-                # Verify model is ready
-                is_ready = await self._grpc_client.is_model_ready(self.model_name)
-                if not is_ready:
-                    raise InferenceException(
-                        f"Model {self.model_name} is not ready",
-                        details={"model": self.model_name}
-                    )
+                # Verify server is live using the first channel
+                ch = self._channel_pool.acquire()
+                if ch:
+                    is_live = await ch.is_server_live()
+                    if not is_live:
+                        raise InferenceException(
+                            "Triton server is not live",
+                            details={"url": self.triton_url}
+                        )
+                    
+                    # Verify model is ready
+                    is_ready = await ch.is_model_ready(self.model_name)
+                    if not is_ready:
+                        raise InferenceException(
+                            f"Model {self.model_name} is not ready",
+                            details={"model": self.model_name}
+                        )
                 
                 logger.info(
-                    "Triton gRPC client connected successfully",
+                    "Triton gRPC channel pool connected successfully",
+                    extra={
+                        "url": self.triton_url,
+                        "model": self.model_name,
+                        "pool_size": settings.triton_pool_size
+                    }
+                )
+            
+            # Initialize tokenizer
+            if self._tokenizer is None:
+                self._tokenizer = AutoTokenizer.from_pretrained(
+                    "distilroberta-base",
+                    use_fast=True  # Use Rust-backed fast tokenizer
+                )
+                logger.info("Tokenizer initialized successfully")
+            
+        except Exception as e:
+            logger.error(
+                f"Failed to initialize Triton client: {str(e)}",
+                exc_info=True
+            )
+            # Don't raise - fall back to heuristic mode
+            self._circuit_state = CircuitState.OPEN
                     extra={"url": self.triton_url, "model": self.model_name}
                 )
             
@@ -191,31 +217,7 @@ class ProductionInferenceClient:
         if self._circuit_state == CircuitState.HALF_OPEN:
             logger.info("Circuit breaker transitioning to CLOSED (service recovered)")
             self._circuit_state = CircuitState.CLOSED
-            self._failure_count = 0
-    
-    def _record_failure(self) -> None:
-        """Record failed inference and update circuit breaker state."""
-        self._failure_count += 1
-        self._total_failures += 1
-        self._last_failure_time = time.time()
-        
-        if self._failure_count >= self._failure_threshold:
-            if self._circuit_state != CircuitState.OPEN:
-                logger.critical(
-                    "Circuit breaker OPEN - switching to fallback heuristics",
-                    extra={
-                        "failure_count": self._failure_count,
-                        "threshold": self._failure_threshold
-                    }
-                )
-                self._circuit_state = CircuitState.OPEN
-    
-    async def _infer_triton(
-        self,
-        text: str,
-        return_embeddings: bool = False
-    ) -> Dict[str, Any]:
-        """Perform inference via Triton gRPC.
+            self._failure_count = 0 using channel pool.
         
         Args:
             text: Input text to classify
@@ -229,8 +231,13 @@ class ProductionInferenceClient:
         """
         start_time = time.perf_counter()
         
-        if self._grpc_client is None:
-            raise InferenceException("Triton client not initialized")
+        if self._channel_pool is None or not self._channel_pool.is_initialized():
+            raise InferenceException("Triton channel pool not initialized")
+        
+        # Acquire a channel from the pool (round-robin)
+        grpc_client = self._channel_pool.acquire()
+        if grpc_client is None:
+            raise InferenceException("Failed to acquire channel from pool")
         
         # Tokenize input using fast tokenizer
         tokens = self._tokenizer(
@@ -238,6 +245,30 @@ class ProductionInferenceClient:
             padding="max_length",
             truncation=True,
             max_length=self.max_seq_length,
+            return_tensors="np"  # Return NumPy arrays directly
+        )
+        
+        input_ids = tokens["input_ids"].astype(np.int64)
+        attention_mask = tokens["attention_mask"].astype(np.int64)
+        
+        # Create Triton InferInput objects (Protocol Buffers under the hood)
+        inputs = [
+            grpcclient.InferInput("input_ids", input_ids.shape, "INT64"),
+            grpcclient.InferInput("attention_mask", attention_mask.shape, "INT64")
+        ]
+        
+        # Set binary data from NumPy arrays
+        inputs[0].set_data_from_numpy(input_ids)
+        inputs[1].set_data_from_numpy(attention_mask)
+        
+        # Define output
+        outputs = [
+            grpcclient.InferRequestedOutput("logits")
+        ]
+        
+        # Execute inference via gRPC
+        try:
+            response = await _length,
             return_tensors="np"  # Return NumPy arrays directly
         )
         
@@ -405,13 +436,13 @@ class ProductionInferenceClient:
         1. Circuit breaker checks
         2. Triton inference (primary)
         3. Fallback to heuristics (if Triton unavailable)
-        4. Telemetry and error handling
-        
-        Args:
-            text: Input text to classify
-            return_embeddings: Whether to return embeddings
-            
-        Returns:
+        4. Telemetry anhannel pool and cleanup resources."""
+        if self._channel_pool is not None:
+            try:
+                await self._channel_pool.close()
+                logger.info("Triton gRPC channel pool closed")
+            except Exception as e:
+                logger.error(f"Error closing channel pool
             Dictionary with classification results
         """
         self._total_requests += 1

@@ -1,0 +1,125 @@
+[build-system]
+requires = ["setuptools>=45", "wheel", "setuptools_scm[toml]>=6.2"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "guardrail-studio"
+version = "0.1.0"
+description = "Ultra-low-latency LLM firewall with continuous drift detection"
+readme = "README.md"
+requires-python = ">=3.11"
+license = {text = "Apache License 2.0"}
+authors = [
+    {name = "GuardRail Team", email = "team@guardrail.studio"},
+]
+keywords = [
+    "llm", "firewall", "security", "guardrails", "prompt-injection",
+    "pii-detection", "drift-detection", "ml-ops"
+]
+
+# ─── Tool Configuration ───────────────────────────────────────────────────
+
+[tool.bandit]
+exclude_dirs = ["tests", "backend/tests"]
+skips = ["B101"]  # assert statements in test code only
+
+[tool.bandit.assert_used]
+skips = ["*/tests/*"]
+
+# Severity levels that BLOCK CI: HIGH only
+# MEDIUM findings are reported but not blocking (documented exception)
+# Rationale: MEDIUM includes things like use of MD5 for non-security hashing
+# which is acceptable in telemetry IDs. HIGH always blocks.
+
+[tool.ruff]
+line-length = 100
+target-version = "py311"
+select = ["E", "F", "I", "N", "W", "UP", "B", "C4", "SIM", "S"]
+ignore = ["E501"]  # handled by Black
+
+# Ignore security checks in tests (B101: use of assert)
+[tool.ruff.per-file-ignores]
+"tests/**" = ["S101"]  # assert_used
+"backend/tests/**" = ["S101"]
+
+[tool.mypy]
+python_version = "3.11"
+strict = true
+ignore_missing_imports = true
+show_error_codes = true
+
+# Per-module type checking
+[[tool.mypy.overrides]]
+module = [
+    "tritonclient.grpc.aio",
+    "tritonclient.utils",
+    "transformers",
+    "numpy",
+    "qdrant_client",
+    "peft",
+    "dask",
+]
+ignore_missing_imports = true
+
+[tool.black]
+line-length = 100
+target-version = ["py311"]
+include = '\.pyi?$'
+extend-exclude = '''
+/(
+  # directories
+  \.eggs
+  | \.git
+  | \.hg
+  | \.mypy_cache
+  | \.tox
+  | \.venv
+  | build
+  | dist
+)/
+'''
+
+[tool.isort]
+profile = "black"
+line_length = 100
+py_version = 311
+skip_glob = ["*/migrations/*"]
+known_first_party = ["src", "backend"]
+
+[tool.pytest.ini_options]
+minversion = "7.0"
+testpaths = ["backend/tests", "tests"]
+asyncio_mode = "auto"
+python_files = ["test_*.py", "*_test.py"]
+addopts = "-v --strict-markers"
+markers = [
+    "unit: unit tests",
+    "integration: integration tests",
+    "slow: slow running tests",
+    "parity: ML parity tests",
+]
+
+[tool.coverage.run]
+source = ["backend/src", "ml_pipelines"]
+branch = true
+omit = [
+    "*/tests/*",
+    "*/__main__.py",
+    "*/site-packages/*",
+]
+
+[tool.coverage.report]
+exclude_lines = [
+    "pragma: no cover",
+    "def __repr__",
+    "raise AssertionError",
+    "raise NotImplementedError",
+    "if __name__ == .__main__.:",
+    "if TYPE_CHECKING:",
+    "if .*(DEBUG|TESTING).*:",
+]
+fail_under = 90
+precision = 2
+
+[tool.coverage.html]
+directory = "htmlcov"
