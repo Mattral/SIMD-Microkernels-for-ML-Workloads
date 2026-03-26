@@ -4,8 +4,8 @@
 
 ### Ultra-Low-Latency, High-Throughput LLM Firewall & Observability Platform
 
-*Built to defend planet-scale LLM systems against prompt injection, PII leakage,
-data poisoning, and model drift — at sub-10 millisecond p99 latency.*
+*Designed to defend planet-scale LLM systems against prompt injection, PII leakage,
+data poisoning, and model drift — with a sub-10 millisecond p99 latency design target.*
 
 [![CI Pipeline](https://github.com/Mattral/GuardRail-Studio/actions/workflows/ci_cd.yaml/badge.svg)](https://github.com/Mattral/GuardRail-Studio/actions/workflows/ci_cd.yaml)
 [![Coverage](https://codecov.io/gh/Mattral/GuardRail-Studio/branch/main/graph/badge.svg)](https://codecov.io/gh/Mattral/GuardRail-Studio)
@@ -28,35 +28,35 @@ data poisoning, and model drift — at sub-10 millisecond p99 latency.*
 ## What is GuardRail Studio?
 
 GuardRail Studio is the **inline firewall** that sits between your application and
-any foundation model. Every prompt is classified, scored, and either **allowed,
-redacted, or blocked** within a **p99 budget of 10 milliseconds** — fast enough to
-deploy in front of GPT-class, Claude-class, or in-house LLM endpoints without users
-noticing the firewall is even there.
+any foundation model. Every prompt is architected to be classified, scored, and either
+**allowed, redacted, or blocked** within a **p99 design target of 10 milliseconds** — an
+architecture intended for use in front of GPT-class, Claude-class, or in-house LLM
+endpoints.
 
-Beyond inline detection, the platform streams every decision to a distributed
-analytics plane that performs continuous **drift detection**, triggers **LoRA-based
-re-fine-tuning**, and rolls out new models with **progressive canary delivery** — all
-while maintaining bit-parity guarantees between PyTorch and ONNX runtimes.
+Beyond inline detection, the platform is designed to stream every decision to a distributed
+analytics plane that supports continuous **drift detection**, triggers **LoRA-based
+re-fine-tuning**, and rolls out new models with **progressive canary delivery** — while
+preserving parity validation between PyTorch and ONNX runtimes.
 
 ---
 
 ## ✨ Highlights
 
-- **🔪 Sub-10 ms p99 inline guardrails** — gRPC + ONNX + Triton + binary protobuf.
+- **🔪 Design target: sub-10 ms p99 inline guardrails** — gRPC + ONNX + Triton + binary protobuf.
 - **🧠 DistilRoBERTa classifier + regex fallback** — classifier-first, but the
   circuit breaker degrades gracefully to a 1.5 ms regex backstop when Triton is
   unhealthy.
 - **🔁 Dual-layer circuit breaker** — application-level state machine *and* Istio
   outlier ejection.
-- **📈 Continuous drift detection** — Dask out-of-core PSI/KL over time-series
+- **📈 Continuous drift detection architecture** — Dask out-of-core PSI/KL over time-series
   partitioned Postgres.
-- **♻️ LoRA continuous fine-tuning** — drift → Airflow DAG → adapter training →
+- **♻️ LoRA fine-tuning pipeline** — drift → Airflow DAG → adapter training →
   ONNX export → Flagger canary → auto-rollback on SLI regression.
 - **🪖 Defence-in-depth** — AWS WAF, Istio mTLS, KMS-at-rest, IAM least privilege,
   IRSA, Secrets Manager.
-- **🔭 Full observability** — Prometheus, OpenTelemetry + Tempo, Loki, Grafana,
+- **🔭 Observability-ready stack** — Prometheus, OpenTelemetry + Tempo, Loki, Grafana,
   Weights & Biases.
-- **🧪 Zero-compromise CI/CD** — Ruff, Black, `mypy --strict`, Trivy, pytest with
+- **🧪 Quality-gate CI/CD** — Ruff, Black, `mypy --strict`, Trivy, pytest with
   90% coverage, bit-parity gate.
 
 ---
@@ -131,7 +131,7 @@ guardrail-studio/
 │
 └── .github/workflows/
     ├── ci.yml                          ← legacy CI
-    └── ci_cd.yaml                      ← zero-compromise CI/CD GitOps pipeline
+    └── ci_cd.yaml                      ← quality-gate CI/CD GitOps pipeline
 ```
 
 ---

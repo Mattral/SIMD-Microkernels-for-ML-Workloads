@@ -91,6 +91,16 @@ class Settings(BaseSettings):
         description="Cache TTL in seconds for repeated prompt classifications"
     )
     
+    # Kafka Configuration
+    kafka_brokers: str = Field(
+        default="localhost:9092",
+        description="Comma-separated list of Kafka broker addresses"
+    )
+    kafka_enabled: bool = Field(
+        default=False,
+        description="Enable Kafka telemetry producer for streaming events"
+    )
+    
     # Logging Configuration
     log_level: str = Field(default="INFO", description="Logging level")
     
