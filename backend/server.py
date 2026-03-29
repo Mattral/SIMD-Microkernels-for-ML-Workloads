@@ -21,6 +21,7 @@ from src.core.exceptions import GuardRailException
 from src.db.postgres import db_manager
 from src.db.qdrant import qdrant_manager
 from src.services.inference_client import inference_client
+from src.services.kafka_producer import get_kafka_producer
 from src.api.routes import health, firewall, telemetry
 
 # Setup structured logging
@@ -48,6 +49,17 @@ async def lifespan(app: FastAPI):
         # Initialize inference client
         logger.info("Initializing inference client (mock)...")
         await inference_client.initialize()
+        
+        # Initialize Kafka producer if enabled
+        if settings.kafka_enabled:
+            try:
+                logger.info(f"Initializing Kafka producer with brokers: {settings.kafka_brokers}")
+                kafka_producer = get_kafka_producer()
+                await kafka_producer.start()
+            except Exception as e:
+                logger.warning(f"Kafka producer initialization failed: {str(e)}. Continuing without Kafka telemetry.")
+        else:
+            logger.info("Kafka telemetry disabled (set KAFKA_ENABLED=true to enable)")
         
         # Initialize W&B if API key is provided
         if settings.wandb_api_key:
@@ -77,6 +89,15 @@ async def lifespan(app: FastAPI):
         await db_manager.close()
         qdrant_manager.close()
         await inference_client.close()
+        
+        # Shutdown Kafka producer if initialized
+        if settings.kafka_enabled:
+            try:
+                kafka_producer = get_kafka_producer()
+                await kafka_producer.stop()
+            except Exception as e:
+                logger.warning(f"Kafka producer shutdown error: {str(e)}")
+        
         logger.info("Shutdown completed successfully")
     except Exception as e:
         logger.error(f"Shutdown error: {str(e)}", exc_info=True)

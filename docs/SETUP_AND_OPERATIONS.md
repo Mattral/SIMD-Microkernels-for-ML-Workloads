@@ -339,6 +339,80 @@ $ kubectl -n guardrail rollout status deploy/guardrail-backend --timeout=5m
 $ kubectl -n guardrail get pods -o wide
 ```
 
+### 7.5 Configure IRSA (IAM Roles for Service Accounts)
+
+IRSA allows Kubernetes pods to assume AWS IAM roles via OIDC federation. The backend
+service account is pre-configured in `production-stack.yaml` with an annotation pointing
+to the backend IAM role created by Terraform.
+
+#### 7.5.1 Verify IRSA setup
+
+```bash
+# Check the service account annotation
+$ kubectl -n guardrail get sa guardrail-backend -o jsonpath='{.metadata.annotations.eks\.amazonaws\.com/role-arn}'
+# Expected output: arn:aws:iam::ACCOUNT_ID:role/guardrail-prod-guardrail-backend
+
+# Verify the pod can assume the role
+$ kubectl -n guardrail run -it debug --image=amazon/aws-cli:latest --restart=Never -- \
+    sts get-caller-identity
+# Expected: Shows assumed role identity
+```
+
+#### 7.5.2 Store secrets in AWS Secrets Manager
+
+```bash
+# Create a secret for database credentials
+$ aws secretsmanager create-secret \
+    --name guardrail/database-credentials \
+    --secret-string '{"username":"dbadmin","password":"YOUR_SECURE_PASSWORD"}' \
+    --region us-east-1
+
+# Backend code retrieves secrets via:
+# from src.core.secrets import secrets_manager
+# db_creds = secrets_manager.get_secret_dict("guardrail/database-credentials")
+```
+
+### 7.6 Enable Kafka Telemetry (Optional)
+
+Kafka streaming telemetry is disabled by default. Enable it for real-time event ingestion:
+
+#### 7.6.1 Deploy Kafka (using Strimzi or Confluent Cloud)
+
+```bash
+# Option A: Local kafka-docker for dev
+$ docker-compose up -d kafka zookeeper
+
+# Option B: Production — Confluent Cloud
+$ # Set KAFKA_BROKERS=broker1.confluent.cloud:9092,broker2.confluent.cloud:9092
+# Set KAFKA_ENABLED=true in ConfigMap
+```
+
+#### 7.6.2 Update backend ConfigMap to enable Kafka
+
+```bash
+$ kubectl -n guardrail patch configmap backend-config --type merge -p '
+{
+  "data": {
+    "KAFKA_ENABLED": "true",
+    "KAFKA_BROKERS": "kafka.default.svc.cluster.local:9092"
+  }
+}
+'
+
+# Redeploy backend to pick up new config
+$ kubectl -n guardrail rollout restart deployment/backend
+```
+
+#### 7.6.3 Verify Kafka events
+
+```bash
+# Monitor events flowing to Kafka topic
+$ kafka-console-consumer.sh --bootstrap-server localhost:9092 \
+    --topic guardrail-studio.firewall-events --from-beginning
+
+# Expected: JSON firewall events (request_id, threat_type, confidence, timestamp)
+```
+
 ---
 
 ## 8. Airflow & Drift Pipeline Bring-up

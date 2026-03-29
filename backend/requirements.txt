@@ -3,6 +3,7 @@ aiohappyeyeballs==2.6.2
 aiohttp==3.13.5
 aiosignal==1.4.0
 aiosqlite==0.19.0
+aiokafka==0.11.0
 annotated-doc==0.0.4
 annotated-types==0.7.0
 anyio==4.13.0

@@ -8,6 +8,7 @@ import time
 from src.services.inference_client import inference_client
 from src.db.qdrant import qdrant_manager
 from src.repositories.telemetry_repo import telemetry_repo
+from src.services.kafka_producer import get_kafka_producer
 from src.schemas.firewall import (
     GuardrailCheckRequest,
     GuardrailCheckResponse,
@@ -153,7 +154,7 @@ class GuardrailService:
         response: GuardrailCheckResponse,
         threat_detected: bool,
     ) -> None:
-        """Background enrichment: ANN lookup + telemetry. Never awaited by caller.
+        """Background enrichment: ANN lookup + telemetry + Kafka. Never awaited by caller.
         
         This task runs asynchronously and NEVER blocks the hot path. If it takes
         200ms or times out, the client has already received their response.
@@ -180,6 +181,29 @@ class GuardrailService:
                 blocked=response.blocked,
                 similar_threat_ids=similar_threat_ids,
             )
+            
+            # Send firewall event to Kafka (if enabled)
+            if settings.kafka_enabled:
+                try:
+                    kafka_producer = get_kafka_producer()
+                    await kafka_producer.send_firewall_event({
+                        "request_id": request_id,
+                        "text_hash": text_hash,
+                        "threat_detected": threat_detected,
+                        "blocked": response.blocked,
+                        "threat_type": inference_result.get("threat_type"),
+                        "confidence": inference_result.get("confidence", 0),
+                        "model_name": inference_result.get("model_name"),
+                        "inference_latency_ms": inference_result.get("latency_ms"),
+                        "similar_threats_count": len(similar_threat_ids),
+                        "timestamp": time.time()
+                    })
+                except Exception as kafka_err:
+                    logger.warning(
+                        "Failed to send firewall event to Kafka: %s",
+                        kafka_err,
+                        extra={"request_id": request_id}
+                    )
             
             logger.debug(
                 "Background enrichment completed",

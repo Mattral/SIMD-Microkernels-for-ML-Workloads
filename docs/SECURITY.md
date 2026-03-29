@@ -59,7 +59,7 @@ attacks. The taxonomy below is the canonical surface we cover.
 | **Model Theft / Exfil** | Bulk inference to clone decision boundary. | WAF rate-limit + per-tenant quota + entropy anomaly on response distribution. | Throttle, raise risk score, alert SOC. |
 | **Denial-of-Wallet** | Bursting expensive inference to inflate cost. | Per-tenant budget meter + WAF. | Hard cutover to fallback heuristics; alert. |
 | **Embedding Inversion** | Reconstruct training data from exposed embeddings. | Embeddings never returned outside the trust boundary. | API never exposes raw embeddings to tenants. |
-| **Side-channel via timings** | Tenant infers model class from latency. | Constant-time padding on response. | Latency uniformised to 10ms ± 1ms via deliberate jitter. |
+| **Side-channel via timings** | Tenant infers model class from latency. | Response padding and jitter are considered to reduce timing leakage. | Target is to keep latency noise within a narrow band where practical. |
 
 ### 2.2 Threat Map vs Code
 
@@ -123,8 +123,12 @@ Denial-of-Wallet          Istio per-tenant quota + WAF               tests/load_
 
 ## 4. IAM Least-Privilege Matrix
 
-Every workload assumes an **IRSA** role with the smallest possible scope. The matrix
-is encoded in [`deploy/terraform/modules/eks/main.tf`](../deploy/terraform/modules/eks/main.tf).
+This architecture is designed so each Kubernetes workload uses an **IRSA** role with
+minimal scope. The backend service account currently implements IRSA in
+[`deploy/terraform/modules/eks/main.tf`](../deploy/terraform/modules/eks/main.tf).
+
+The following matrix shows the recommended end-state role mapping for the full
+platform architecture:
 
 | Workload | Role | Allowed Actions | Resources |
 | --- | --- | --- | --- |
@@ -138,7 +142,7 @@ is encoded in [`deploy/terraform/modules/eks/main.tf`](../deploy/terraform/modul
 | `dask-worker` | `gr-dask-role` | `rds-db:connect` | RDS read-replica only |
 | | | `s3:GetObject` | `arn:aws:s3:::guardrail-analytics/*` |
 
-**No workload has wildcard `s3:*`. Ever.**
+**No workload should have wildcard `s3:*` in a least-privilege deployment.**
 
 ---
 
@@ -197,7 +201,9 @@ Custom rules:
 
 ## 7. Secrets Management
 
-**Single source of truth: AWS Secrets Manager.** Nothing else. Period.
+**Primary source of truth: AWS Secrets Manager.** The architecture favors Secrets
+Manager as the principal secret store and minimizes static credentials in repository
+or cluster configuration.
 
 ```
                      ┌─────────────────────────────┐
@@ -209,8 +215,8 @@ Custom rules:
                                     │ IRSA + IAM
                                     ▼
                      ┌─────────────────────────────┐
-                     │  External Secrets Operator  │  syncs into k8s Secrets
-                     │  (ESO, refresh 60s)         │
+                     │  Optional sync layer        │  e.g. External Secrets Operator
+                     │  (refresh interval configurable)         │
                      └──────────────┬──────────────┘
                                     ▼
                      ┌─────────────────────────────┐
@@ -219,11 +225,11 @@ Custom rules:
                      └─────────────────────────────┘
 ```
 
-Rules:
+Rules and policy intent:
 
-- **No `.env` in any git history.** Pre-commit hook blocks the pattern `*_API_KEY=`.
-- **No long-lived static creds.** Database access uses IAM auth tokens (15-min TTL).
-- **No secrets in ConfigMaps.** Ever.
+- **Avoid `.env` in git history.** The repository aims to keep static secrets out of version control.
+- **No long-lived static creds.** Database access is intended to use IAM auth tokens where available.
+- **Do not store secrets in ConfigMaps.** ConfigMaps are for configuration only.
 - **Rotation cadence**: WAF tokens 30 d, DB IAM N/A, JWT signing keys 90 d, KMS CMK 365 d.
 
 ---
@@ -232,10 +238,9 @@ Rules:
 
 GuardRail Studio is designed to **minimise PII exposure**:
 
-1. **Request bodies are never persisted** unless the request was *blocked* (small,
-   audit-only). Blocked payloads are hashed (SHA-256) and only the hash is stored;
-   the raw payload is kept in S3 with an **object-level expiration of 30 days**
-   and SSE-KMS.
+1. **The architecture intends to avoid persisting request bodies** unless the request
+   is *blocked* for audit purposes. If persisted, blocked payloads should be hashed
+   (SHA-256) and the raw payload retained only under strict expiration and encryption.
 2. **Embeddings are never returned to tenants** to prevent inversion attacks.
 3. **All training data is anonymised** at ingestion via the
    `continuous_finetuning.py::redact_pii()` helper.

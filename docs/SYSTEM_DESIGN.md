@@ -21,10 +21,10 @@ operating the platform at planetary scale.
 
 GuardRail Studio sits in the synchronous request path between a calling application
 (typically an LLM-powered SaaS) and an upstream foundation model. Every prompt is
-classified, scored, and either allowed, redacted, or rejected within a **p99 budget of
-10 ms**. The platform additionally streams telemetry to a distributed analytics plane
-that performs continuous drift detection and triggers LoRA-based model
-re-fine-tuning when distributional shift is observed.
+architected to be classified, scored, and either allowed, redacted, or rejected within a
+**p99 design target of 10 ms**. The platform is designed to stream telemetry to a
+distributed analytics plane that supports drift detection and triggers LoRA-based
+model re-fine-tuning when distributional shift is observed.
 
 ### 1.1 Design Goals (Hard Constraints)
 
@@ -35,7 +35,7 @@ re-fine-tuning when distributional shift is observed.
 | Availability | 99.99% | Dual-layer circuit breakers + Istio outlier ejection |
 | Drift Detection | < 5 min lag | Dask streaming PSI/KL divergence over Postgres partitions |
 | Model Recovery | < 30 min | Airflow DAG → LoRA fine-tune → Flagger canary |
-| Security | Zero plaintext PII at rest | Tokenisation + AWS KMS + WAF + IRSA |
+| Security | Minimise plaintext PII at rest | Tokenisation + AWS KMS + WAF + IRSA |
 
 ### 1.2 Anti-Goals
 
@@ -491,6 +491,42 @@ OpenTelemetry agent runs as DaemonSet to scrape OTLP from each pod.
 
 Dask workers and FastAPI workers run in **separate Deployments** with separate HPAs.
 A drift-detection job cannot starve the hot path of CPU.
+
+### 8.7 Async Telemetry Producer — Kafka Streaming
+
+Firewall events and performance metrics are produced asynchronously to Kafka topics
+without blocking the hot path. This enables real-time streaming ingestion into analytics,
+monitoring, and drift detection systems.
+
+```python
+# backend/src/services/kafka_producer.py
+class KafkaTelemetryProducer:
+    """Async Kafka producer for telemetry events."""
+    
+    async def send_firewall_event(self, event: Dict[str, Any]) -> None:
+        """Send firewall classification event to guardrail-studio.firewall-events topic."""
+        # Example payload:
+        # {
+        #     "request_id": "req_abc123",
+        #     "text_hash": "sha256(...)",
+        #     "threat_detected": True,
+        #     "blocked": True,
+        #     "threat_type": "prompt_injection",
+        #     "confidence": 0.92,
+        #     "timestamp": 1717300000.0
+        # }
+```
+
+**Integration Points:**
+- Enabled via `KAFKA_ENABLED=true` and `KAFKA_BROKERS="broker1:9092,broker2:9092"`
+- Started in FastAPI lifespan handler (graceful startup/shutdown).
+- Invoked as fire-and-forget background task in `GuardrailService._enrich_and_log()`.
+- Failures logged but never bubble up to the client.
+
+**Topics:**
+- `guardrail-studio.firewall-events` — Request classification results.
+- `guardrail-studio.performance-metrics` — Latency, throughput, cache hit rate.
+- `guardrail-studio.drift-signals` — Data drift detection signals.
 
 ---
 
