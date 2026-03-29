@@ -32,40 +32,40 @@ client-side by `frontend/src/App.js` and is served behind the platform's
 ### 1.1 Landing View — Mockup
 
 ```
-┌──────────────────────────────────────────────────────────────────────────────────┐
-│  ▣  GuardRail Studio                                  region: us-east-1 ● live   │
-│                                                                                  │
-│  ┌────────────┐ ┌────────────┐ ┌────────────┐ ┌────────────┐ ┌────────────┐    │
-│  │ Throughput │ │ Latency p99│ │  Blocked   │ │   Drift    │ │  Uptime    │    │
-│  │ 24,812 RPS │ │   8.7 ms   │ │   3.1 %    │ │   0.024    │ │  99.998 %  │    │
-│  │  ▲  +4.2%  │ │  ▼  −1.1ms │ │  ▲  +0.4%  │ │  ▬  flat   │ │  ▬  steady │    │
-│  └────────────┘ └────────────┘ └────────────┘ └────────────┘ └────────────┘    │
-│                                                                                  │
-│  ┌──────────────────────────────────┐  ┌────────────────────────────────────┐  │
-│  │  Latency Histogram (60s rolling) │  │  Threat-Type Mix (60s)             │  │
-│  │  count                            │  │                                    │  │
-│  │  ▇▇▇▇▇▇▇▇▇▆▅▄▃▂▁▁                │  │  ▒▒▒▒▒▒▒▒▒▒▒▒  prompt_inject 62%   │  │
-│  │  └─┬──┬──┬──┬──┬──┬──┬──┬──┬──┬─▶│  │  ▓▓▓▓▓▓        pii_detection 28%   │  │
-│  │   2  4  6  8 10 12 14 16 18 20ms │  │  ░░             toxicity      10%   │  │
-│  └──────────────────────────────────┘  └────────────────────────────────────┘  │
-│                                                                                  │
-│  ┌────────────────────────────────────────────────────────────────────────────┐ │
-│  │  System Status                                                              │ │
-│  │   triton-server         ● ready    4/4 pods    p99 7.1 ms                   │ │
-│  │   postgres-aurora       ● ready    1 wr + 2 ro  93 conns                    │ │
-│  │   qdrant                ● ready    3/3 pods    HNSW healthy                 │ │
-│  │   circuit-breaker       ● CLOSED   0 recent failures                        │ │
-│  │   flagger-canary        ○ idle     last promote 12 m ago                    │ │
-│  └────────────────────────────────────────────────────────────────────────────┘ │
-│                                                                                  │
-│  ┌────────────────────────────────────────────────────────────────────────────┐ │
-│  │  Live Request Log (tail -f)                                                 │ │
-│  │   17:04:33  req_42af  ALLOWED  none           1.8 ms  model=v3.2            │ │
-│  │   17:04:33  req_42b0  BLOCKED  prompt_inject  2.1 ms  conf=0.93             │ │
-│  │   17:04:33  req_42b1  ALLOWED  none           1.4 ms  model=v3.2            │ │
-│  │   17:04:33  req_42b2  BLOCKED  pii_detection  1.9 ms  conf=0.88             │ │
-│  └────────────────────────────────────────────────────────────────────────────┘ │
-└──────────────────────────────────────────────────────────────────────────────────┘
+┌─────────────────────────────────────────────────────────────────────────────────────────┐
+│  ▣  GuardRail Studio                                  region: us-east-1 ● live         │
+│                                                                                         │
+│  ┌────────────┐ ┌────────────┐ ┌────────────┐ ┌────────────┐ ┌────────────┐             │
+│  │ Throughput │ │ Latency p99│ │  Blocked   │ │   Drift    │ │  Uptime    │             │
+│  │ 24,812 RPS │ │   8.7 ms   │ │   3.1 %    │ │   0.024    │ │  99.998 %  │             │
+│  │  ▲  +4.2%  │ │  ▼  −1.1ms │ │  ▲  +0.4%  │ │  ▬  flat   │ │  ▬  steady │             │
+│  └────────────┘ └────────────┘ └────────────┘ └────────────┘ └────────────┘             │
+│                                                                                         │
+│  ┌──────────────────────────────────┐  ┌───────────────────────────────────────┐        │
+│  │  Latency Histogram (60s rolling) │  │  Threat-Type Mix (60s)                │        │
+│  │  count                            │  │                                      │        │
+│  │  ▇▇▇▇▇▇▇▇▇▆▅▄▃▂▁▁                │  │  ▒▒▒▒▒▒▒▒▒▒▒▒  prompt_inject 62%│   │
+│  │  └─┬──┬──┬──┬──┬──┬──┬──┬──┬──┬─▶│  │  ▓▓▓▓▓▓        pii_detection 28%     │        │
+│  │   2  4  6  8 10 12 14 16 18 20ms │  │  ░░             toxicity      10%     │        │
+│  └──────────────────────────────────┘  └───────────────────────────────────────┘        │
+│                                                                                         │
+│  ┌────────────────────────────────────────────────────────────────────────────┐         │
+│  │  System Status                                                             │         │
+│  │   triton-server         ● ready    4/4 pods    p99 7.1 ms                  │         │
+│  │   postgres-aurora       ● ready    1 wr + 2 ro  93 conns                   │         │
+│  │   qdrant                ● ready    3/3 pods    HNSW healthy                │         │
+│  │   circuit-breaker       ● CLOSED   0 recent failures                       │         │
+│  │   flagger-canary        ○ idle     last promote 12 m ago                   │         │
+│  └────────────────────────────────────────────────────────────────────────────┘         │
+│                                                                                         │
+│  ┌────────────────────────────────────────────────────────────────────────────┐         │
+│  │  Live Request Log (tail -f)                                                │         │
+│  │   17:04:33  req_42af  ALLOWED  none           1.8 ms  model=v3.2           │         │
+│  │   17:04:33  req_42b0  BLOCKED  prompt_inject  2.1 ms  conf=0.93            │         │
+│  │   17:04:33  req_42b1  ALLOWED  none           1.4 ms  model=v3.2           │         │
+│  │   17:04:33  req_42b2  BLOCKED  pii_detection  1.9 ms  conf=0.88            │         │
+│  └────────────────────────────────────────────────────────────────────────────┘         │
+└─────────────────────────────────────────────────────────────────────────────────────────┘
 ```
 
 ### 1.2 Component Map
@@ -118,21 +118,21 @@ boards bundled with the platform.
 ┌──────────────────────────────────────────────────────────────────────────────┐
 │  Hot Path SLO            time range: last 6h    refresh: 30s                 │
 │                                                                              │
-│  ┌──────────────────────────┐  ┌──────────────────────────────────────────┐ │
-│  │  Latency percentiles      │  │  Error budget burn rate                  │ │
-│  │  p50  ──────  4.1 ms      │  │  ┌─────────────────────────────────┐    │ │
-│  │  p95  ──────  7.8 ms      │  │  │     ╱╲                          │    │ │
-│  │  p99  ──────  9.2 ms      │  │  │    ╱  ╲___                      │    │ │
-│  │  p99.9 ─────  13.1 ms ⚠   │  │  │___╱       ╲____                 │    │ │
-│  │                            │  │  └─────────────────────────────────┘    │ │
-│  └──────────────────────────┘  └──────────────────────────────────────────┘ │
+│  ┌──────────────────────────┐  ┌──────────────────────────────────────────┐  │
+│  │  Latency percentiles      │  │  Error budget burn rate                 │  │
+│  │  p50  ──────  4.1 ms      │  │  ┌─────────────────────────────────┐    │  │
+│  │  p95  ──────  7.8 ms      │  │  │     ╱╲                          │    │  │
+│  │  p99  ──────  9.2 ms      │  │  │    ╱  ╲___                      │    │  │
+│  │  p99.9 ─────  13.1 ms ⚠   │  │  │___╱       ╲____                │    │  │
+│  │                            │  │  └────────────────────────────────┘    │  │
+│  └──────────────────────────┘  └──────────────────────────────────────────┘  │
 │                                                                              │
-│  ┌──────────────────────────┐  ┌──────────────────────────────────────────┐ │
-│  │  Throughput vs Capacity   │  │  Circuit-Breaker state by pod            │ │
-│  │  current 24.8k / 32.0k    │  │  pod-0  CLOSED                            │ │
-│  │  ████████████████░░░░░░   │  │  pod-1  CLOSED                            │ │
-│  │  77.5% utilised            │  │  pod-2  HALF_OPEN  ← investigate         │ │
-│  └──────────────────────────┘  └──────────────────────────────────────────┘ │
+│  ┌──────────────────────────┐  ┌──────────────────────────────────────────┐  │
+│  │  Throughput vs Capacity   │  │  Circuit-Breaker state by pod           │  │
+│  │  current 24.8k / 32.0k    │  │  pod-0  CLOSED                          │  │
+│  │  ████████████████░░░░░░   │  │  pod-1  CLOSED                          │  │
+│  │  77.5% utilised            │  │  pod-2  HALF_OPEN  ← investigate       │  │
+│  └──────────────────────────┘  └──────────────────────────────────────────┘  │
 └──────────────────────────────────────────────────────────────────────────────┘
 ```
 
@@ -206,24 +206,24 @@ guardrail-studio  (project)
 ### 4.1 Mockup: W&B Run View
 
 ```
-┌──────────────────────────────────────────────────────────────────────────────┐
-│  guardrail-studio / drift-retrain-2026-02-15                                 │
-│                                                                              │
-│  Runs (3)                                                                    │
-│   ● finetune-lora-r8       ✓ completed   eval/f1 = 0.962      35m            │
-│   ● export-onnx            ✓ completed   parity/max = 3.9e-7    4m            │
-│   ● validate-parity        ✓ completed   parity/pass = true     2m            │
-│                                                                              │
-│  Artifacts                                                                   │
-│   guardrail-model:v17  (1.4 GB)  ↳ pushed to s3://guardrail-models/3.3/      │
-│   lora-adapter:v17    (24 MB)    ↳ pushed to s3://guardrail-models/lora/v17/ │
-│                                                                              │
-│  Lineage Graph                                                               │
+┌────────────────────────────────────────────────────────────────────────────────┐
+│  guardrail-studio / drift-retrain-2026-02-15                                   │
+│                                                                                │
+│  Runs (3)                                                                      │
+│   ● finetune-lora-r8       ✓ completed   eval/f1 = 0.962      35m              │
+│   ● export-onnx            ✓ completed   parity/max = 3.9e-7    4m             │
+│   ● validate-parity        ✓ completed   parity/pass = true     2m             │
+│                                                                                │
+│  Artifacts                                                                     │
+│   guardrail-model:v17  (1.4 GB)  ↳ pushed to s3://guardrail-models/3.3/        │
+│   lora-adapter:v17    (24 MB)    ↳ pushed to s3://guardrail-models/lora/v17/   │
+│                                                                                │
+│  Lineage Graph                                                                 │ 
 │   train_set:v9 ──▶ finetune-lora-r8 ──▶ lora-adapter:v17 ──▶ export-onnx ──▶ │
-│       ▲                                                              │       │
-│       │                                                              ▼       │
-│   drift-report:2026-02-15                                guardrail-model:v17 │
-└──────────────────────────────────────────────────────────────────────────────┘
+│       ▲                                                              │         │
+│       │                                                              ▼         │
+│   drift-report:2026-02-15                                guardrail-model:v17   │ 
+└────────────────────────────────────────────────────────────────────────────────┘
 ```
 
 ---
