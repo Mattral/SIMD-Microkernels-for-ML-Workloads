@@ -312,3 +312,4 @@ are written.
 
 > Continue to [`docs/PHILOSOPHY.md`](./PHILOSOPHY.md) for the *spirit* behind these
 > rules.
+
