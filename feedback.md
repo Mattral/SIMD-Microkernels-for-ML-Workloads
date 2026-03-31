@@ -452,4 +452,3 @@ Create `ROADMAP.md` at the repo root. Entries must be honest about current statu
 
 ---
 
-**End of directive. Begin with Fix 1 (remove `-ffast-math` from test targets), then Fix 2 (contiguity validation), then P0-1 through P0-4 in order.**
