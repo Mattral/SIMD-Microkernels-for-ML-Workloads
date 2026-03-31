@@ -1,5 +1,3 @@
----
-
 # ENGINEERING DIRECTIVE: SIMD-Microkernels Remediation & Roadmap
 
 **From:** Principal Review  
