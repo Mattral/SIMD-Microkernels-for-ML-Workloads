@@ -590,3 +590,4 @@ Wire schemas (Pydantic) live in
 
 > See [`docs/PHILOSOPHY.md`](./PHILOSOPHY.md) for the engineering principles that
 > govern *how* we make these design choices, not just *what* they are.
+
