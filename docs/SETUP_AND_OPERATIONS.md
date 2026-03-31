@@ -559,3 +559,4 @@ $ terraform apply -target=module.eks           # re-apply prior state
 
 > **You have just operated GuardRail Studio from `git clone` to multi-AZ production.**
 > Now go read [`docs/PHILOSOPHY.md`](./PHILOSOPHY.md) to learn *why* we built it this way.
+
