@@ -1,5 +1,3 @@
-Here is the precise, unambiguous directive for the coding agent:
-
 ---
 
 # ENGINEERING DIRECTIVE: SIMD-Microkernels Remediation & Roadmap
