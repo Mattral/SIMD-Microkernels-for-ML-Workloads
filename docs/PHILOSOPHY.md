@@ -32,15 +32,15 @@ has cost a real production outage at companies that came before us.
 Every design decision in this repo can be justified against one of four pillars:
 
 ```
-┌─────────────────────────────────────────────────────────────────┐
-│                                                                 │
-│      LATENCY        TRUST         OBSERVABILITY     RECOVERY    │
-│      ───────       ──────         ─────────────     ────────    │
-│   sub-10ms p99    zero-trust      every span        auto rollback│
-│   gRPC binary     mTLS + WAF      every metric      Flagger gate │
-│   ONNX/TensorRT   KMS + SM        every log         circuit brk  │
-│                                                                 │
-└─────────────────────────────────────────────────────────────────┘
+┌───────────────────────────────────────────────────────────────────┐
+│                                                                   │
+│      LATENCY        TRUST         OBSERVABILITY     RECOVERY      │
+│      ───────       ──────         ─────────────     ────────      │ 
+│   sub-10ms p99    zero-trust      every span        auto rollback │
+│   gRPC binary     mTLS + WAF      every metric      Flagger gate  │
+│   ONNX/TensorRT   KMS + SM        every log         circuit brk   │
+│                                                                   │
+└───────────────────────────────────────────────────────────────────┘
 ```
 
 If a PR cannot point to a pillar it is improving, the PR is closed.
@@ -181,17 +181,17 @@ The chart looks like this:
 ```
                 Latency Sensitivity
                        ▲
-                       │     ┌────────────────────────────┐
-                       │     │  Triton + TensorRT + ONNX  │ ← sharp
+                       │     ┌─────────────────────────────┐
+                       │     │  Triton + TensorRT + ONNX   │ ← sharp
                        │     │  HNSW Qdrant                │
                        │     │  gRPC binary protocol       │
-                       │     └────────────────────────────┘
+                       │     └─────────────────────────────┘
                        │
-                       │ ┌────────────────────────────────┐
+                       │ ┌─────────────────────────────────┐
                        │ │  Postgres + Aurora              │ ← boring
                        │ │  Helm + Flagger                 │
                        │ │  OpenTelemetry + Grafana        │
-                       │ └────────────────────────────────┘
+                       │ └─────────────────────────────────┘
                        └─────────────────────────────────────▶
                                   Operational Risk
 ```
