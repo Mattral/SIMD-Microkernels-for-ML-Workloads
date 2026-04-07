@@ -350,3 +350,4 @@ Legend:  ▣ success    ▢ running    ▤ failed    .  skipped
 > When in doubt, [`docs/SETUP_AND_OPERATIONS.md §11`](./SETUP_AND_OPERATIONS.md#11-day-2-operations--runbooks)
 > has the canonical day-2 runbooks. This document focuses on **interpreting** the UI
 > surfaces; that one focuses on **acting** on them.
+
