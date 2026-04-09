@@ -8,6 +8,8 @@ set(CMAKE_CXX_STANDARD_REQUIRED ON)
 # ─── Find dependencies ────────────────────────────────────────────────────────
 find_package(Python3 REQUIRED COMPONENTS Interpreter Development)
 find_package(pybind11)
+find_package(OpenMP OPTIONAL_COMPONENTS CXX)
+option(SIMD_ML_OPENMP "Enable OpenMP multithreading in GEMM" OFF)
 
 # ─── Detect AVX support ──────────────────────────────────────────────────────
 include(CheckCXXCompilerFlag)
@@ -43,18 +45,18 @@ endif()
 add_library(simd_kernels_lib STATIC
     src/kernels/avx_matmul.cpp
     src/kernels/intrinsic_gelu.cpp
+    src/kernels/gemm/avx2_gemm_packed.cpp
 )
-target_include_directories(simd_kernels_lib PUBLIC src/kernels)
+target_include_directories(simd_kernels_lib PUBLIC src ${CMAKE_SOURCE_DIR}/src/kernels)
 set_target_properties(simd_kernels_lib PROPERTIES POSITION_INDEPENDENT_CODE ON)
 target_compile_options(simd_kernels_lib PRIVATE ${PERF_FLAGS})
 
-# Optional OpenMP support for multithreaded kernels (v0.6)
-find_package(OpenMP)
-if(OpenMP_CXX_FOUND)
-    message(STATUS "OpenMP found: enabling for simd_kernels_lib and bench")
+if(OpenMP_CXX_FOUND AND SIMD_ML_OPENMP)
+    message(STATUS "OpenMP C++ found; enabling multithreaded GEMM support")
     target_link_libraries(simd_kernels_lib PUBLIC OpenMP::OpenMP_CXX)
+    target_compile_definitions(simd_kernels_lib PUBLIC SIMD_ML_OPENMP)
 else()
-    message(STATUS "OpenMP not found: building single-threaded kernels")
+    message(STATUS "OpenMP support disabled or not found")
 endif()
 
 # ─── Python extension module (optional) ───────────────────────────────────────

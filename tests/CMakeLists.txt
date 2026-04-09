@@ -4,6 +4,7 @@
 add_library(simd_kernels_precision_lib STATIC
     ../src/kernels/avx_matmul.cpp
     ../src/kernels/intrinsic_gelu.cpp
+    ../src/kernels/gemm/avx2_gemm_packed.cpp
 )
 target_include_directories(simd_kernels_precision_lib PUBLIC ${CMAKE_SOURCE_DIR}/src/kernels)
 target_compile_options(simd_kernels_precision_lib PRIVATE ${PRECISION_FLAGS})
@@ -15,6 +16,7 @@ add_executable(simd_tests
     test_alignment.cpp
     test_gelu.cpp
     test_gemm.cpp
+    test_gemm_packed.cpp
 )
 target_include_directories(simd_tests PRIVATE ${CMAKE_SOURCE_DIR}/src/kernels)
 target_link_libraries(simd_tests PRIVATE simd_kernels_precision_lib)

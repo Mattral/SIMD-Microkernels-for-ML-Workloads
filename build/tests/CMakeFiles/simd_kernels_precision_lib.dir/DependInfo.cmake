@@ -9,6 +9,7 @@ set(CMAKE_DEPENDS_LANGUAGES
 # The set of dependency files which are needed:
 set(CMAKE_DEPENDS_DEPENDENCY_FILES
   "/workspaces/SIMD-Microkernels-for-ML-Workloads/src/kernels/avx_matmul.cpp" "tests/CMakeFiles/simd_kernels_precision_lib.dir/__/src/kernels/avx_matmul.cpp.o" "gcc" "tests/CMakeFiles/simd_kernels_precision_lib.dir/__/src/kernels/avx_matmul.cpp.o.d"
+  "/workspaces/SIMD-Microkernels-for-ML-Workloads/src/kernels/gemm/avx2_gemm_packed.cpp" "tests/CMakeFiles/simd_kernels_precision_lib.dir/__/src/kernels/gemm/avx2_gemm_packed.cpp.o" "gcc" "tests/CMakeFiles/simd_kernels_precision_lib.dir/__/src/kernels/gemm/avx2_gemm_packed.cpp.o.d"
   "/workspaces/SIMD-Microkernels-for-ML-Workloads/src/kernels/intrinsic_gelu.cpp" "tests/CMakeFiles/simd_kernels_precision_lib.dir/__/src/kernels/intrinsic_gelu.cpp.o" "gcc" "tests/CMakeFiles/simd_kernels_precision_lib.dir/__/src/kernels/intrinsic_gelu.cpp.o.d"
   )
 

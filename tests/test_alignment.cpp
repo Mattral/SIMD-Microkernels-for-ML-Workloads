@@ -45,6 +45,7 @@ int run_alignment_tests() {
 // ─── Forward declarations ────────────────────────────────────────────────────
 int run_gemm_tests();
 int run_gelu_tests();
+int run_gemm_packed_tests();
 
 // ─── Main test runner ─────────────────────────────────────────────────────────
 int main() {
@@ -56,6 +57,7 @@ int main() {
     result |= run_alignment_tests();
     result |= run_gelu_tests();
     result |= run_gemm_tests();
+    result |= run_gemm_packed_tests();
 
     printf("\n%s\n", result == 0
         ? "═══ ALL TESTS PASSED ═══"

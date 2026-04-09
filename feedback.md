@@ -1,452 +1,1264 @@
-# ENGINEERING DIRECTIVE: SIMD-Microkernels Remediation & Roadmap
-
-**From:** Principal Review  
-**Priority:** P0 (blocking correctness) → P1 (core kernel engineering) → P2 (measurement & documentation)  
-**Context:** A deep audit found that this repo's three most important requirements — a true register-blocked GEMM microkernel with matrix packing, calibrated cycle-accurate GFLOPS measurements, and a roofline-grounded README — are entirely absent. The build system and project structure are solid and require no changes. All remediation work is in the kernel code, the benchmark harness, and the documentation. Execute in strict P0 → P1 → P2 order.
+# IntrinsicML — SIMD Microkernels for ML Workloads
+# GitHub Copilot Upgrade Instructions — FAANG / Frontier-Lab Standard
+# Target: v2.0 | Systems Engineer / ML Compiler Hiring Bar
 
 ---
 
-## IMMEDIATE FIXES (Do Before Any New Code)
+## STRATEGIC BRIEF — READ BEFORE ANY PROMPT BLOCK
 
-### Fix 1: Remove `-ffast-math` from the Precision Test Target
+### Honest state of the repo today
 
-**File:** `CMakeLists.txt`
+The repo is C++ 68.8% / Python 27.1% / CMake 4.1%.
+It has 6 commits and 6 stars. Zero forks.
 
-The current build applies `-ffast-math` globally to all targets including the benchmark. This means your precision tests are comparing a non-IEEE SIMD approximation against a non-IEEE scalar reference. The reference is corrupted by the same flag. You cannot measure approximation error against a distorted ground truth.
+What exists is genuinely good scaffolding:
+- CMakeLists.txt with AVX2/AVX-512 detection, correct `-march=native -O3 -mfma` flags
+- RDTSC-based benchmarking harness
+- pybind11 Python bindings
+- Tests directory (structure exists, need to verify depth)
 
-**Change:** Split compiler flags into two sets:
+What the README honestly admits is missing and is killing this repo's signal:
+- No matrix packing (Goto/BLIS algorithm — the #1 missing piece)
+- No multithreading (OpenMP is 4 lines to add)
+- No comparison against OpenBLAS/Eigen (the most important table for any
+  systems engineer reviewing this)
+- Benchmarking has no CPU pinning, no frequency locking, no statistical rigor
+- README explicitly says "educational, not state-of-the-art" — this is
+  self-defeating for a portfolio repo
 
-```cmake
-# Performance flags — for kernels and bench only
-set(PERF_FLAGS "-O3" "-march=native" "-mfma" "-ffast-math" "-DNDEBUG")
-
-# Precision flags — for test targets only; NO -ffast-math
-set(PRECISION_FLAGS "-O2" "-march=native" "-mfma" "-DNDEBUG")
-```
-
-Apply `PERF_FLAGS` to `simd_kernels_lib`, `simd_kernels` (pybind extension), and `bench`.  
-Apply `PRECISION_FLAGS` to every target under `tests/`.
-
-The reference scalar implementation used in precision tests must be compiled with `-O2` and no `-ffast-math` so it computes IEEE 754-conforming results that serve as genuine ground truth.
-
-**Acceptance:** `tests/test_precision.py` must compare SIMD output against a `numpy.float64` reference (not `float32`) and must assert `max_abs_error < 1e-5` for GeLU across the range `[-5.0, 5.0]` in steps of 0.001.
-
----
-
-### Fix 2: Validate Buffer Contiguity in Python Bindings
-
-**File:** `src/bindings/pybind_entry.cpp`
-
-NumPy arrays that are slices or transposes are not C-contiguous. Passing a non-contiguous buffer's raw pointer to a SIMD kernel that assumes row-major stride will silently produce wrong results — no crash, no error, wrong numbers.
-
-Add contiguity and type checks at every binding entry point:
-
-```cpp
-// At the top of every bound function that accepts a numpy array:
-if (!A.dtype().is(py::dtype::of<float>()))
-    throw std::runtime_error("Expected float32 array");
-if (!A.attr("flags").attr("c_contiguous").cast<bool>())
-    throw std::runtime_error(
-        "Input array must be C-contiguous. "
-        "Call numpy.ascontiguousarray(arr) before passing.");
-// Also check shape dimensions are compatible with kernel tile size
-```
-
-Also add an alignment check: if the user passes a pre-existing NumPy array whose data pointer is not 32-byte aligned (required for `_mm256_load_ps`), fall back to `_mm256_loadu_ps` (unaligned load) rather than crashing with a SIGBUS. Add a `bool is_aligned = (reinterpret_cast<uintptr_t>(ptr) % 32 == 0)` check and branch.
-
-**Acceptance:** Add `tests/test_bindings_edge_cases.py` that deliberately passes a non-contiguous slice and verifies a `RuntimeError` is raised with the descriptive message.
+The goal of this upgrade: **remove every self-deprecating disclaimer by
+actually fixing the underlying gaps.** A FAANG systems reviewer should see
+a repo that competes seriously with OpenBLAS on single-core throughput via
+a documented, principled approach.
 
 ---
 
-## P0 — BENCHMARK HARNESS: Make RDTSC Actually Cycle-Accurate
+## ANSWERED DESIGN QUESTIONS
 
-**File:** `src/main_bench.cpp`
+### 100% test coverage?
 
-The current RDTSC harness reads the timestamp counter but does not calibrate it to actual core frequency. On modern CPUs with Turbo Boost, the TSC frequency (nominally the rated base clock) diverges from the actual execution frequency. You cannot compute GFLOPS from raw TSC ticks without knowing ticks-per-second.
+**No — target 95% line coverage on kernel source, 100% on public API surface.**
+For systems code the meaningful tests are:
+1. Numerical correctness (bit-for-bit agreement with reference for small sizes)
+2. Performance regression gates (throughput must not drop >5% vs baseline)
+3. Edge cases (non-multiple-of-8 dimensions, minimum sizes, alignment cases)
+4. UB detection (run tests under AddressSanitizer and UBSanitizer in CI)
 
-### P0-1: Calibrate TSC Frequency
+### Is CI relevant?
 
-Add a one-time calibration function at program start that measures TSC ticks over a known wall-clock interval using `clock_gettime(CLOCK_MONOTONIC)`:
+**Absolutely yes — more than any other repo in your portfolio.** Reasons:
+- C++ code has undefined behaviour and alignment bugs that are hardware-
+  specific. CI on multiple compiler versions catches this.
+- Performance regression tests need to run on a consistent machine — use
+  a self-hosted runner or GitHub-hosted large runner for benchmarks.
+- Cross-platform: AVX2 is x86 only. CI must detect and skip SIMD paths on
+  ARM (e.g., Apple Silicon GitHub runners) gracefully.
 
-```cpp
-static uint64_t calibrate_tsc_hz() {
-    // Warm up to reach turbo state
-    volatile double sink = 0.0;
-    for (int i = 0; i < 1000000; ++i) sink += i * 0.001;
+Two CI workflows: `build-and-test.yml` (every PR) + `bench.yml` (weekly
+scheduled + main pushes, uploads results as artefacts).
 
-    struct timespec t0, t1;
-    uint64_t tsc0 = __rdtsc();
-    clock_gettime(CLOCK_MONOTONIC, &t0);
 
-    // Sleep for a known interval — 100ms is sufficient
-    struct timespec req = {0, 100'000'000L};
-    nanosleep(&req, nullptr);
+The right infra additions are: **Docker** (reproducibility), **GitHub Actions**
+(CI), and **perf / VTune** integration in the benchmark harness (credibility).
 
-    uint64_t tsc1 = __rdtsc();
-    clock_gettime(CLOCK_MONOTONIC, &t1);
 
-    uint64_t ns_elapsed = (t1.tv_sec - t0.tv_sec) * 1'000'000'000ULL
-                        + (t1.tv_nsec - t0.tv_nsec);
-    uint64_t tsc_elapsed = tsc1 - tsc0;
+**Note:** add a thin Rust `safe_wrapper` crate using PyO3 that wraps the
+C++ library via FFI as a second-surface (1–2 days of work). This shows you
+understand cross-language FFI without abandoning C++. The Rust wrapper is
+the ONLY Rust code in this repo.
 
-    return (uint64_t)((double)tsc_elapsed / (double)ns_elapsed * 1e9);
-}
-```
+### How to evaluate and benchmark?
 
-Store this as `const uint64_t TSC_HZ = calibrate_tsc_hz()` before any benchmark runs.
+See BLOCK 5 (benchmark harness) in full detail. Short answer:
+- Primary metric: **GFLOPS** (not "speedup" — GFLOPS is hardware-independent
+  and comparable across machines)
+- Baseline: OpenBLAS SGEMM (single-threaded, then multi-threaded)
+- Secondary: Eigen, naive triple-loop, naïve auto-vectorised
+- Methodology: CPU frequency lock + core pinning + 100 warm-up iterations
+  + median of 1000 trials + report p50/p95/p99
+- Report % of theoretical peak (= 2 × frequency × AVX2 FMA lanes × cores)
+  This is how BLIS/OpenBLAS papers report performance and it is what
+  hardware engineers understand immediately
 
-### P0-2: Use CPUID Serialization Around RDTSC
+### How to be top-tier?
 
-Raw `__rdtsc()` can be reordered by the CPU's out-of-order execution engine, making cycle counts unreliable for short sequences. Replace bare `__rdtsc()` with serialized reads:
-
-```cpp
-static inline uint64_t rdtsc_start() {
-    unsigned aux;
-    // CPUID serializes: prevents instructions before this point
-    // from being measured as part of the timed region
-    _mm_lfence();  // Lighter than CPUID; sufficient for AMD+Intel
-    return __rdtsc();
-}
-
-static inline uint64_t rdtsc_end() {
-    uint64_t tsc = __rdtscp(&(unsigned){0}); // RDTSCP: waits for prior stores
-    _mm_lfence();  // Prevent subsequent instructions from leaking back
-    return tsc;
-}
-```
-
-Use `rdtsc_start()` / `rdtsc_end()` for all measurements. Never use bare `__rdtsc()` in timing code.
-
-### P0-3: Pin the Benchmark Thread to One Core
-
-Without CPU affinity, the OS scheduler may migrate the benchmark thread between cores mid-run, causing a TSC discontinuity. Add affinity pinning at the start of `main()`:
-
-```cpp
-#ifdef __linux__
-#include <sched.h>
-static void pin_to_core(int core_id) {
-    cpu_set_t cpuset;
-    CPU_ZERO(&cpuset);
-    CPU_SET(core_id, &cpuset);
-    if (sched_setaffinity(0, sizeof(cpuset), &cpuset) != 0)
-        std::cerr << "Warning: failed to pin to core " << core_id << "\n";
-}
-#endif
-// In main(): pin_to_core(0);
-```
-
-### P0-4: Report Actual Measured GFLOPS
-
-Every benchmark run must compute and print real GFLOPS:
-
-```cpp
-// For an M×K×N GEMM:
-const double flops = 2.0 * M * N * K;  // 1 multiply + 1 add per element
-const double elapsed_seconds = (double)(tsc_end - tsc_start) / (double)TSC_HZ;
-const double gflops = (flops / elapsed_seconds) / 1e9;
-
-printf("GEMM %4zu×%4zu×%4zu | cycles: %8zu | time: %.3f ms | %.2f GFLOPS\n",
-       M, N, K, (size_t)(tsc_end - tsc_start),
-       elapsed_seconds * 1000.0, gflops);
-```
-
-Report: raw cycle count, elapsed milliseconds, achieved GFLOPS, and theoretical peak GFLOPS (hardcoded for your build machine: `peak = cores × freq_GHz × 16` for AVX2 FP32, or `× 32` for AVX-512 FP32). Compute and print utilization percentage: `(achieved / peak) * 100`.
-
-**Acceptance:** Running `./bench` must output a table with real numbers, no "~" ranges, no "Indicative" labels. The output must include utilization percentage so the reader immediately knows how far below theoretical peak the kernel runs.
+Four moves, in priority order:
+1. **Implement packed GEMM** (Goto algorithm). This is the single biggest
+   technical gap and the most important algorithmic contribution. Without it
+   the current kernel is a demo, not a kernel.
+2. **Add OpenBLAS comparison table** with actual measured GFLOPS committed
+   to the repo. This changes the entire narrative.
+3. **Add AVX-512 path** and a runtime ISA dispatcher that selects AVX-512 vs
+   AVX2 vs SSE4.2 at startup. This is what production kernels do.
+4. **Add multithreading via OpenMP** with a performance model showing how
+   parallelism interacts with cache hierarchy.
 
 ---
 
-## P1 — CORE KERNEL: Implement a Real GEMM Microkernel
+## TARGET REPOSITORY STRUCTURE
 
-This is the most important engineering work in the entire repo. The current tiled triple-loop is not a microkernel. It is a cache-blocked loop. The difference is packing and explicit register accumulation.
+```
+IntrinsicML/
+│
+├── src/
+│   ├── kernels/
+│   │   ├── gemm/
+│   │   │   ├── naive_gemm.hpp          # Scalar reference (correctness oracle)
+│   │   │   ├── avx2_gemm.cpp           # AVX2 GEMM (no packing — current)
+│   │   │   ├── avx2_gemm_packed.cpp    # AVX2 GEMM with packing (NEW — P0)
+│   │   │   ├── avx512_gemm_packed.cpp  # AVX-512 path (NEW)
+│   │   │   └── gemm_dispatcher.cpp     # Runtime ISA dispatch (NEW)
+│   │   ├── activations/
+│   │   │   ├── gelu_avx2.cpp           # Vectorised GeLU (current)
+│   │   │   ├── gelu_avx512.cpp         # AVX-512 GeLU (NEW)
+│   │   │   ├── relu_avx2.cpp           # NEW
+│   │   │   ├── silu_avx2.cpp           # NEW (used in LLaMA etc.)
+│   │   │   └── softmax_avx2.cpp        # NEW (row-wise online softmax)
+│   │   ├── attention/
+│   │   │   └── flash_attention_v1.cpp  # Single-head FlashAttention CPU (NEW)
+│   │   ├── quantization/
+│   │   │   └── int8_quant.cpp          # Symmetric int8 quantization (NEW)
+│   │   └── cache_alloc.hpp             # 64-byte aligned allocator (current)
+│   ├── bindings/
+│   │   └── pybind_entry.cpp            # Python/pybind11 bindings (expand)
+│   ├── dispatch/
+│   │   ├── cpuid.hpp                   # CPUID feature detection (NEW)
+│   │   └── kernel_registry.hpp        # Dispatch table (NEW)
+│   └── main_bench.cpp                  # CLI benchmark harness (upgrade)
+│
+├── tests/
+│   ├── CMakeLists.txt
+│   ├── unit/
+│   │   ├── test_gemm_correctness.cpp
+│   │   ├── test_gemm_packed_correctness.cpp
+│   │   ├── test_gelu_correctness.cpp
+│   │   ├── test_activations_correctness.cpp
+│   │   ├── test_int8_quant.cpp
+│   │   └── test_dispatcher.cpp
+│   ├── precision/
+│   │   └── test_ulp_error.cpp          # Max ULP error vs reference
+│   ├── performance/
+│   │   └── test_perf_regression.py     # Python perf gate (via simd_kernels)
+│   └── python/
+│       └── test_precision.py           # Existing — upgrade
+│
+├── benchmarks/
+│   ├── bench_gemm.cpp                  # GFLOPS across sizes vs OpenBLAS
+│   ├── bench_activations.cpp           # GB/s for activation functions
+│   ├── bench_e2e_mlp.cpp               # End-to-end MLP forward pass
+│   ├── run_suite.sh                    # Pin CPU, disable turbo, run all
+│   └── results/
+│       ├── gemm_results.json           # Committed baseline (your machine)
+│       └── README.md                   # How to regenerate
+│
+├── docs/
+│   ├── design/
+│   │   ├── gemm_algorithm.md           # Goto GEMM with diagrams
+│   │   ├── avx2_register_file.md       # Register blocking explanation
+│   │   ├── cache_hierarchy.md          # Cache model and tiling rationale
+│   │   └── performance_model.md        # Roofline model for this hardware
+│   └── api/
+│       └── python_api.md
+│
+├── rust_wrapper/                       # Optional thin Rust/PyO3 surface
+│   ├── Cargo.toml
+│   └── src/
+│       └── lib.rs
+│
+├── .github/
+│   └── workflows/
+│       ├── build-and-test.yml          # Every PR
+│       └── bench.yml                   # Weekly + main push
+│
+├── Dockerfile
+├── CMakeLists.txt                      # Upgrade existing
+├── pyproject.toml                      # Already exists
+├── BENCHMARKS.md                       # Committed results with methodology
+├── DESIGN.md                           # Algorithm design decisions
+├── CONTRIBUTING.md
+├── CITATION.cff
+└── README.md                           # Full overhaul
+```
 
-### P1-1: Implement Matrix B Panel Packing
+---
 
-**File:** `src/kernels/avx_matmul.cpp` (new function `pack_B_panel`)
+## CONTEXT BRIEF (paste at top of every Copilot session)
 
-The reason production GEMM kernels achieve near-peak FLOP/s is that the B matrix is repacked into a layout where every cache line contains consecutive data in the order the inner kernel accesses it. Without packing, accessing B's columns causes stride-N cache misses.
+```
+Repository: https://github.com/Mattral/SIMD-Microkernels-for-ML-Workloads
+Language: C++17, Python 3.10+
+Build: CMake 3.22+, pybind11, OpenBLAS (for benchmarking comparison only)
+CI: GitHub Actions (.github/workflows/)
+Tests: CTest (C++ unit tests) + pytest (Python precision tests)
+Primary metric: GFLOPS (FP32 single-threaded) vs OpenBLAS baseline
+Target ISA: AVX2/FMA (primary), AVX-512 (secondary), SSE4.2 (fallback)
+Known gaps being fixed in this session: [PASTE RELEVANT BLOCK TITLE]
+```
 
-```cpp
-// Pack a (kc × nc) panel of B into contiguous column-major layout
-// so that the inner kernel streams B sequentially.
-// kc: block size along K dimension (must fit with A panel in L1 together)
-// nr: inner kernel width (8 for AVX2, 16 for AVX-512)
-void pack_B_panel(
-    const float* B,   // original B, row-major, stride N
-    float*       Bp,  // packed output buffer, must be 64-byte aligned
-    int K, int N,     // original dimensions
-    int ib, int kc, int jb, int nc, int nr
-) {
-    // For each k in [ib, ib+kc), for each j in [jb, jb+nc) in nr-wide strips:
-    // write B[k][j:j+nr] contiguously into Bp
-    // Result: Bp is laid out as [kc][nc/nr][nr] = kc * nc floats
-    // Inner kernel reads Bp as a stream with unit stride
-    for (int k = 0; k < kc && (ib + k) < K; ++k) {
-        for (int j = 0; j < nc; j += nr) {
-            int actual_nr = std::min(nr, nc - j);
-            const float* src = B + (ib + k) * N + (jb + j);
-            float* dst = Bp + k * nc + j;
-            std::memcpy(dst, src, actual_nr * sizeof(float));
-            // Zero-pad to nr boundary for safe SIMD loads
-            if (actual_nr < nr)
-                std::memset(dst + actual_nr, 0, (nr - actual_nr) * sizeof(float));
-        }
+---
+
+## BLOCK 1 — Packed GEMM: the Goto algorithm (P0 — most important)
+
+**Create file:** `src/kernels/gemm/avx2_gemm_packed.cpp`
+**Create file:** `src/kernels/gemm/avx2_gemm_packed.hpp`
+
+**Prompt:**
+
+```
+Implement a packed FP32 GEMM kernel using the Goto/BLIS algorithm for the
+AVX2/FMA instruction set. This is the single most important addition to this
+repository.
+
+The Goto algorithm (Goto & van de Geijn, 2008) structures GEMM as:
+  C += A * B  (column-major or row-major, your choice — document it)
+using a three-level packing strategy:
+  1. Pack B panel into a contiguous L3-cache-resident buffer (kc × nc block)
+  2. Pack A panel into a contiguous L2-cache-resident buffer (mc × kc block)
+  3. Inner kernel operates on a 6×16 (or 8×16 for AVX2) register block
+
+FILE: src/kernels/gemm/avx2_gemm_packed.hpp
+
+Define the tile sizes as constexpr (document WHY each value is chosen):
+
+  // AVX2 YMM register file: 16 registers × 256 bits = 16 × 8 FP32 lanes
+  // Optimal inner tile for AVX2 FMA: 8 rows × 8 cols (uses 8 accumulators
+  // leaving 8 registers for A/B loads and scratch)
+  constexpr int MR = 8;  // register rows (fits 1 YMM per row)
+  constexpr int NR = 8;  // register cols
+
+  // L1 cache: typically 32KB → kc should satisfy:
+  //   kc × (MR + NR) × sizeof(float) ≤ L1_SIZE / 2
+  // For 32KB L1: kc = 256 satisfies 256*(8+8)*4 = 16384 = L1/2 ✓
+  constexpr int KC = 256;
+
+  // L2 cache: typically 256KB → mc should satisfy:
+  //   mc × kc × sizeof(float) ≤ L2_SIZE / 2
+  // For 256KB: mc = 128 satisfies 128*256*4 = 131072 ≈ L2/2 ✓
+  constexpr int MC = 128;
+
+  // L3 cache: typically 8MB → nc should satisfy:
+  //   nc × kc × sizeof(float) ≤ L3_SIZE / 3
+  constexpr int NC = 2048;
+
+FILE: src/kernels/gemm/avx2_gemm_packed.cpp
+
+Implement the following functions:
+
+1. void pack_b_panel(const float* B, int ldb, int k, int n,
+                    float* B_packed)
+   - Packs a kc×nc panel of B into column-major packed format
+   - Inner loop vectorised with _mm256_loadu_ps / _mm256_storeu_ps
+   - Handles remainder (non-multiple-of-8) with masked loads
+
+2. void pack_a_panel(const float* A, int lda, int m, int k,
+                    float* A_packed)
+   - Packs a mc×kc panel of A into row-major packed format
+
+3. void inner_kernel_8x8(const float* A_packed, const float* B_packed,
+                          float* C, int ldc, int k_rem)
+   - Core 8×8 micro-kernel using AVX2/FMA
+   - 8 YMM accumulator registers (c00..c07)
+   - Fused multiply-add loop: for each k, load 1 YMM from B (8 floats),
+     broadcast each of 8 A elements, FMA into accumulators
+   - At end, add existing C values and store
+   - Fully unroll the k loop for small k values (k=1..4)
+
+4. void sgemm_packed(int M, int N, int K,
+                     float alpha, const float* A, int lda,
+                     const float* B, int ldb,
+                     float beta, float* C, int ldc)
+   - BLAS-compatible signature
+   - Implements the three-loop BLIS structure:
+     for nc_block:
+       pack B panel
+       for mc_block:
+         pack A panel
+         for kc_block:
+           inner_kernel_8x8 loop over MR×NR tiles
+   - Handles boundary conditions (M, N, K not multiples of MC/NC/KC)
+   - Uses posix_memalign for pack buffers (or cache_alloc.hpp)
+
+Every comment must reference the Goto/BLIS paper section it implements.
+Include the paper reference at the top:
+  // Reference: Goto, K., & van de Geijn, R. (2008). Anatomy of
+  // High-Performance Matrix Multiplication. ACM TOMS, 34(3).
+  // DOI: 10.1145/1356052.1356053
+
+IMPORTANT: Do NOT omit boundary handling. The most common bug in GEMM
+implementations is silently producing wrong results when M/N/K are not
+multiples of the tile size. Every inner loop must handle the tail case.
+```
+
+**Acceptance criteria:**
+- `ctest -R test_gemm_packed_correctness` passes for M,N,K in
+  {1, 7, 8, 9, 16, 127, 128, 129, 256, 512, 1024}
+- Max absolute error vs naive_gemm reference < 1e-4 for all sizes
+- GFLOPS on 512×512 is ≥ 60% of naive GEMM on the same machine
+  (demonstrates packing benefit — not targeting OpenBLAS yet)
+
+---
+
+## BLOCK 2 — Runtime ISA dispatcher
+
+**Create files:** `src/dispatch/cpuid.hpp`, `src/dispatch/kernel_registry.hpp`,
+  `src/kernels/gemm/gemm_dispatcher.cpp`
+
+**Prompt:**
+
+```
+Implement a runtime CPU feature detection and kernel dispatch system.
+This is what separates a production kernel library from a demo.
+
+FILE: src/dispatch/cpuid.hpp
+
+Implement a CpuFeatures struct using the CPUID instruction:
+
+struct CpuFeatures {
+    bool has_avx2   = false;
+    bool has_avx512f = false;
+    bool has_avx512dq = false;
+    bool has_fma    = false;
+    bool has_sse42  = false;
+
+    static CpuFeatures detect() noexcept;
+};
+
+Implement CpuFeatures::detect() using:
+  - __cpuid_count (GCC/Clang) or __cpuidex (MSVC)
+  - Check EBX bit 5 for AVX2, EBX bit 16 for AVX-512F
+  - Check ECX bit 12 for FMA (leaf 1)
+  - Add a static singleton: const CpuFeatures& CpuFeatures::get()
+    using std::call_once for thread-safe initialisation
+
+FILE: src/dispatch/kernel_registry.hpp
+
+Define a function pointer table:
+
+using SgemmFn = void(*)(int M, int N, int K,
+                         float alpha, const float* A, int lda,
+                         const float* B, int ldb,
+                         float beta, float* C, int ldc);
+
+using GeluFn = void(*)(const float* input, float* output, int n);
+
+struct KernelRegistry {
+    SgemmFn sgemm;
+    GeluFn  gelu;
+    const char* isa_label;  // "avx512", "avx2", "sse42", "scalar"
+};
+
+const KernelRegistry& get_kernels();
+// Returns the optimal registry for the current CPU.
+// Called once at program startup via static initialisation.
+
+FILE: src/kernels/gemm/gemm_dispatcher.cpp
+
+Implement get_kernels():
+  - If AVX-512F + DQ available: use avx512_gemm_packed, gelu_avx512
+  - Else if AVX2 + FMA: use avx2_gemm_packed, gelu_avx2
+  - Else if SSE4.2: use sse42_gemm (fallback, unoptimised but correct)
+  - Else: use naive_gemm (pure scalar, always correct)
+
+Expose the public API via the dispatcher:
+  void sgemm(int M, int N, int K, float alpha, const float* A, int lda,
+             const float* B, int ldb, float beta, float* C, int ldc);
+  → calls get_kernels().sgemm(...)
+
+This means user code never selects a kernel path manually.
+
+Test in tests/unit/test_dispatcher.cpp:
+  - test_dispatcher_selects_avx2_or_better: on a machine with AVX2,
+    get_kernels().isa_label must be "avx2" or "avx512"
+  - test_dispatcher_result_consistent: sgemm() result must match
+    naive_gemm() result for a 32×32 matrix (verifying the dispatch
+    doesn't break correctness)
+  - test_fallback_scalar_correct: instantiate the scalar path directly
+    and verify it produces correct results for a 5×5 matrix
+
+Update pybind11 bindings to expose the ISA label:
+  simd_kernels.detected_isa()  # Returns "avx2", "avx512", etc.
+```
+
+**Acceptance criteria:**
+- On an AVX2 machine, `python -c "import simd_kernels; print(simd_kernels.detected_isa())"` prints "avx2" or "avx512".
+- `ctest -R test_dispatcher` passes.
+- On an ARM machine (GitHub Actions ubuntu-arm runner), the library compiles and the scalar fallback is selected.
+
+---
+
+## BLOCK 3 — New activation kernels: ReLU, SiLU, row-wise Softmax
+
+**Create files:** `src/kernels/activations/relu_avx2.cpp`,
+  `src/kernels/activations/silu_avx2.cpp`,
+  `src/kernels/activations/softmax_avx2.cpp`
+
+**Prompt:**
+
+```
+Implement three additional activation kernels using AVX2/FMA intrinsics.
+Each kernel must match the existing gelu_avx2.cpp pattern: C++ implementation,
+pybind11 binding, correctness test vs scalar reference, ULP error test.
+
+FILE: src/kernels/activations/relu_avx2.cpp
+
+void relu_avx2(const float* input, float* output, int n);
+// ReLU: output[i] = max(0, input[i])
+// Implementation: _mm256_max_ps(x, _mm256_setzero_ps())
+// No branches. Handle tail (n % 8 != 0) with scalar loop.
+// Add a note: _mm256_max_ps is ~0.5 cycles latency on Zen3/Skylake.
+// This is memory-bandwidth-bound for large n — document the GB/s measurement.
+
+FILE: src/kernels/activations/silu_avx2.cpp
+
+void silu_avx2(const float* input, float* output, int n);
+// SiLU (Sigmoid Linear Unit): output[i] = x * sigmoid(x) = x / (1 + exp(-x))
+// Used in LLaMA-2, Mistral, and most modern LLMs.
+//
+// Implementation using the fast sigmoid approximation:
+// sigmoid(x) ≈ 0.5 * (1 + tanh(0.5 * x))
+// which can be computed with a Padé approximation in SIMD:
+//   sigmoid(x) ≈ 1 / (1 + exp(-x))
+// Use the following polynomial approximation valid in [-8, 8]:
+//   exp(-x) ≈ computed via AVX2 exp approximation (see note below)
+//
+// For exp, use the Cephes-style approach:
+//   1. Range reduce: x = n*ln2 + r where n=round(x/ln2)
+//   2. Polynomial approximation for exp(r) using degree-5 Horner scheme
+//   3. Scale back: result = ldexp(exp(r), n)
+//   All in AVX2 using _mm256_cvtps_epi32, _mm256_castsi256_ps
+//
+// Document max absolute error vs std::exp (target: < 2^-23 = ~1.2e-7)
+
+FILE: src/kernels/activations/softmax_avx2.cpp
+
+void softmax_row_avx2(const float* input, float* output, int n);
+// Row-wise softmax: output[i] = exp(input[i]) / sum_j(exp(input[j]))
+// Uses numerically stable variant: subtract max(input) before exp
+//   max_val = reduce_max(input, n)
+//   for i: temp[i] = exp(input[i] - max_val)
+//   sum = reduce_sum(temp, n)
+//   for i: output[i] = temp[i] / sum
+//
+// Implementation notes:
+//   - Horizontal max via two _mm256_max_ps + _mm256_permute2f128_ps passes
+//   - Horizontal sum via same reduction pattern
+//   - Reuse the exp approximation from silu_avx2.cpp (extract to inline header)
+//   - Handle n < 8 and n % 8 != 0 tail cases correctly
+
+Add tests in tests/unit/test_activations_correctness.cpp:
+
+  void test_relu_zero_crossing() {
+    // Elements near 0 must round to 0 for negatives and pass through for positives
+    float input[] = {-1.0f, -0.0f, 0.0f, 1.0f, 100.0f, -100.0f, 0.001f, -0.001f};
+    float output[8];
+    relu_avx2(input, output, 8);
+    for (int i = 0; i < 8; ++i) {
+      float expected = std::max(0.0f, input[i]);
+      ASSERT_FLOAT_EQ(output[i], expected);
+    }
+  }
+
+  void test_silu_agrees_with_reference() {
+    // Max absolute error vs scalar silu must be < 1e-5
+    for each x in linspace(-8, 8, 10000) {
+      float scalar_silu = x / (1.0f + std::exp(-x));
+      // compare with silu_avx2 result
+      // assert max abs error < 1e-5
+    }
+  }
+
+  void test_softmax_sums_to_one() {
+    // For any input, softmax output must sum to 1.0 within 1e-5
+    // Test for n = 1, 7, 8, 9, 16, 100, 1024
+  }
+
+  void test_softmax_numerical_stability() {
+    // Input with large values (e.g., [1000.0, 1000.0, 1000.0]) must not
+    // produce NaN or Inf
+    float input[3] = {1000.0f, 1000.0f, 1000.0f};
+    float output[3];
+    softmax_row_avx2(input, output, 3);
+    for (int i = 0; i < 3; ++i) {
+      ASSERT_FALSE(std::isnan(output[i]));
+      ASSERT_FLOAT_EQ(output[i], 1.0f / 3.0f);
+    }
+  }
+```
+
+---
+
+## BLOCK 4 — Multithreading with OpenMP
+
+**Files to modify:** `src/kernels/gemm/avx2_gemm_packed.cpp`, `CMakeLists.txt`
+
+**Prompt:**
+
+```
+Add OpenMP parallelism to the packed GEMM kernel. This is the critical
+missing feature that transforms the kernel from single-core to multi-core.
+
+FILE: src/kernels/gemm/avx2_gemm_packed.cpp (modify)
+
+In the outermost loop (nc_block loop) of sgemm_packed(), add:
+
+  #ifdef SIMD_ML_OPENMP
+  #pragma omp parallel for schedule(dynamic, 1) num_threads(num_threads)
+  #endif
+  for (int jc = 0; jc < N; jc += NC) {
+    // ... existing loop body
+  }
+
+The parallelism must be:
+1. Optional: controlled by a compile-time flag SIMD_ML_OPENMP and a runtime
+   flag: void set_num_threads(int n_threads);
+2. Thread-safe: each thread gets its own A_packed and B_packed buffers
+   (allocate per-thread with thread_local storage or a thread pool)
+3. Correct: thread_local pack buffers mean no false sharing
+
+Also add:
+  int get_num_threads();           // Returns current thread count
+  void set_num_threads(int n);     // Sets OpenMP thread count
+
+FILE: CMakeLists.txt (modify)
+
+Add after the existing find_package calls:
+  find_package(OpenMP OPTIONAL_COMPONENTS CXX)
+  option(SIMD_ML_OPENMP "Enable OpenMP multithreading in GEMM" OFF)
+  # OFF by default so single-threaded benchmarks are reproducible
+
+  if(OpenMP_CXX_FOUND AND SIMD_ML_OPENMP)
+    target_link_libraries(simd_kernels_lib PUBLIC OpenMP::OpenMP_CXX)
+    target_compile_definitions(simd_kernels_lib PUBLIC SIMD_ML_OPENMP)
+  endif()
+
+Update pybind11 bindings:
+  simd_kernels.set_num_threads(4)   # Exposes OpenMP control to Python
+  simd_kernels.get_num_threads()
+
+Tests in tests/unit/test_threading.cpp:
+  test_multithreaded_gemm_correct:
+    // Run sgemm_packed with 1, 2, 4 threads
+    // All must produce bit-identical results to single-threaded
+    for threads in [1, 2, 4]:
+      set_num_threads(threads)
+      result = sgemm(512, 512, 512, ...)
+      assert max_abs_diff(result, reference) < 1e-4
+
+  test_thread_count_respected:
+    set_num_threads(2)
+    assert get_num_threads() == 2
+```
+
+---
+
+## BLOCK 5 — Production benchmark harness with statistical rigor
+
+**Create files:** `benchmarks/bench_gemm.cpp`, `benchmarks/run_suite.sh`,
+  `benchmarks/results/gemm_results.json`
+
+**Prompt:**
+
+```
+Replace the RDTSC-only benchmark harness with a statistically rigorous
+benchmarking system. The current harness has no CPU pinning, no frequency
+locking, and reports only minimum-of-N. FAANG performance engineers use
+proper methodology.
+
+FILE: benchmarks/bench_gemm.cpp
+
+Implement a benchmark that:
+
+1. Measurements:
+   - Warm-up: 100 iterations (not timed)
+   - Measured iterations: 1000
+   - Report: mean, p50, p95, p99, min, max (all in nanoseconds and GFLOPS)
+   - Compute GFLOPS: (2 * M * N * K) / (time_ns * 1e-9) / 1e9
+     (factor 2 for multiply + add in FMA)
+
+2. Baselines to compare against (via dynamic linking / dlopen if available,
+   or via a compile-time optional):
+   #ifdef BENCH_OPENBLAS
+     #include <cblas.h>
+     // Run cblas_sgemm with the same parameters
+   #endif
+   #ifdef BENCH_EIGEN
+     #include <Eigen/Dense>
+     // Run Eigen matmul
+   #endif
+   Always run the naive triple-loop as a mandatory fallback baseline.
+
+3. Matrix sizes to benchmark:
+   int sizes[] = {64, 128, 256, 384, 512, 768, 1024, 2048, 4096};
+   For each size S: M = N = K = S (square matrices)
+   Also: non-square workloads representative of LLM layers:
+     {M=1, N=4096, K=4096},   // vector × matrix (decode step)
+     {M=128, N=4096, K=4096}, // small batch × matrix (prefill)
+
+4. Output format:
+   JSON to benchmarks/results/gemm_results.json:
+   {
+     "generated_at": "ISO-8601",
+     "hardware": {
+       "cpu": "...",
+       "isa": "avx2|avx512",
+       "n_cores": 4,
+       "frequency_mhz": 3600,
+       "l1_kb": 32, "l2_kb": 256, "l3_mb": 8
+     },
+     "results": [
+       {
+         "kernel": "avx2_packed",
+         "M": 512, "N": 512, "K": 512,
+         "gflops_p50": 45.2,
+         "gflops_p95": 44.8,
+         "gflops_p99": 43.1,
+         "pct_peak": 0.58,
+         "vs_openblas_ratio": 0.72
+       },
+       ...
+     ]
+   }
+   Also print Markdown table to stdout.
+
+5. pct_peak calculation:
+   theoretical_peak_gflops = 2.0 * freq_ghz * avx2_fma_lanes * n_threads
+   // AVX2 FMA: 2 ops/cycle × 8 FP32/lane = 16 FP32 ops/cycle/core
+   // At 3.6GHz, 1 core: 3.6 × 16 = 57.6 GFLOPS/core
+   pct_peak = measured_gflops / theoretical_peak_gflops
+
+FILE: benchmarks/run_suite.sh
+
+#!/usr/bin/env bash
+set -euo pipefail
+
+echo "=== IntrinsicML Benchmark Suite ==="
+
+# Step 1: Disable CPU frequency scaling (requires sudo; skip gracefully if unavailable)
+if command -v cpupower &>/dev/null; then
+    echo "Locking CPU frequency to performance governor..."
+    sudo cpupower frequency-set -g performance 2>/dev/null || \
+        echo "Warning: Could not lock frequency (run as root for reproducible results)"
+fi
+
+# Step 2: Pin to a single core using taskset
+CORE=0
+echo "Pinning to core ${CORE}"
+TASKSET_CMD="taskset -c ${CORE}"
+
+# Step 3: Run benchmarks
+echo "Running GEMM benchmark..."
+${TASKSET_CMD} ./build/bench_gemm --output benchmarks/results/gemm_results.json
+
+echo "Running activation benchmark..."
+${TASKSET_CMD} ./build/bench_activations --output benchmarks/results/activation_results.json
+
+echo "=== Benchmark complete. Results in benchmarks/results/ ==="
+echo "Methodology: freq-locked (if root), single-core pinned, 1000 trials, p50/p95/p99"
+
+FILE: benchmarks/results/README.md
+
+Document:
+1. Hardware used to generate baseline results (CPU, frequency, L-cache sizes)
+2. Exact command to regenerate: bash benchmarks/run_suite.sh
+3. How to interpret pct_peak (theoretical peak model)
+4. Warning: results are hardware-specific; CI results (no freq lock) are
+   for regression detection only, not absolute comparison
+5. Link to Goto & van de Geijn (2008) for algorithmic background
+
+Commit a real run of gemm_results.json after running the suite.
+```
+
+---
+
+## BLOCK 6 — C++ unit tests: correctness + AddressSanitizer + UBSan
+
+**Create files:** `tests/CMakeLists.txt` (upgrade),
+  `tests/unit/test_gemm_correctness.cpp`
+
+**Prompt:**
+
+```
+Create a comprehensive C++ unit test suite using Google Test (or doctest —
+lighter, header-only, preferred for microkernel repos).
+
+Use doctest (https://github.com/doctest/doctest) — add as a FetchContent
+dependency in tests/CMakeLists.txt.
+
+FILE: tests/CMakeLists.txt
+
+cmake_minimum_required(VERSION 3.22)
+
+include(FetchContent)
+FetchContent_Declare(
+  doctest
+  GIT_REPOSITORY https://github.com/doctest/doctest.git
+  GIT_TAG v2.4.11
+)
+FetchContent_MakeAvailable(doctest)
+
+# AddressSanitizer + UBSanitizer build (separate target)
+add_executable(tests_asan
+    unit/test_gemm_correctness.cpp
+    unit/test_gemm_packed_correctness.cpp
+    unit/test_gelu_correctness.cpp
+    unit/test_activations_correctness.cpp
+    unit/test_dispatcher.cpp
+)
+target_link_libraries(tests_asan PRIVATE simd_kernels_lib doctest::doctest)
+target_compile_options(tests_asan PRIVATE -fsanitize=address,undefined -g -O1)
+target_link_options(tests_asan PRIVATE -fsanitize=address,undefined)
+# Note: disable -march=native for ASAN builds — it complicates ASAN symbolization
+
+# Normal test executable
+add_executable(tests_release
+    unit/test_gemm_correctness.cpp
+    unit/test_gemm_packed_correctness.cpp
+    unit/test_gelu_correctness.cpp
+    unit/test_activations_correctness.cpp
+    unit/test_dispatcher.cpp
+    unit/test_threading.cpp
+    precision/test_ulp_error.cpp
+)
+target_link_libraries(tests_release PRIVATE simd_kernels_lib doctest::doctest)
+target_compile_options(tests_release PRIVATE ${SIMD_FLAGS})
+
+add_test(NAME unit_tests_release COMMAND tests_release)
+add_test(NAME unit_tests_asan    COMMAND tests_asan)
+
+FILE: tests/unit/test_gemm_correctness.cpp
+
+#define DOCTEST_CONFIG_IMPLEMENT_WITH_MAIN
+#include <doctest/doctest.h>
+#include "kernels/gemm/avx2_gemm_packed.hpp"
+#include "kernels/gemm/naive_gemm.hpp"
+#include <vector>
+#include <cmath>
+#include <cstdlib>
+
+// Helper: random float matrix in [-1, 1]
+std::vector<float> rand_matrix(int rows, int cols, unsigned seed = 42) {
+    std::srand(seed);
+    std::vector<float> m(rows * cols);
+    for (auto& v : m) v = (std::rand() / (float)RAND_MAX) * 2.0f - 1.0f;
+    return m;
+}
+
+float max_abs_diff(const std::vector<float>& a, const std::vector<float>& b) {
+    float diff = 0.0f;
+    for (size_t i = 0; i < a.size(); ++i)
+        diff = std::max(diff, std::abs(a[i] - b[i]));
+    return diff;
+}
+
+// Test every size from 1..16 (catches all alignment and tail cases)
+TEST_CASE("packed_sgemm correctness small sizes") {
+    for (int S = 1; S <= 16; ++S) {
+        auto A = rand_matrix(S, S, 1);
+        auto B = rand_matrix(S, S, 2);
+        std::vector<float> C_our(S*S, 0.0f);
+        std::vector<float> C_ref(S*S, 0.0f);
+        sgemm_packed(S, S, S, 1.0f, A.data(), S, B.data(), S, 0.0f, C_our.data(), S);
+        naive_sgemm(S, S, S, 1.0f, A.data(), S, B.data(), S, 0.0f, C_ref.data(), S);
+        float err = max_abs_diff(C_our, C_ref);
+        CHECK_MESSAGE(err < 1e-4f,
+            "SGEMM error at S=" << S << ": max_abs_diff=" << err);
     }
 }
-```
 
-Implement the equivalent `pack_A_panel` that repacks an `(mc × kc)` panel of A into row-major layout matching the inner kernel's access order.
+// Test non-square matrices (LLM decode shapes)
+TEST_CASE("packed_sgemm LLM decode shape M=1,N=4096,K=4096") {
+    int M=1, N=256, K=256;  // Scaled down for CI speed, expand for local
+    auto A = rand_matrix(M, K, 3);
+    auto B = rand_matrix(K, N, 4);
+    std::vector<float> C_our(M*N, 0.0f);
+    std::vector<float> C_ref(M*N, 0.0f);
+    sgemm_packed(M, N, K, 1.0f, A.data(), K, B.data(), N, 0.0f, C_our.data(), N);
+    naive_sgemm(M, N, K, 1.0f, A.data(), K, B.data(), N, 0.0f, C_ref.data(), N);
+    CHECK(max_abs_diff(C_our, C_ref) < 1e-4f);
+}
 
-### P1-2: Implement the 8×8 AVX2 Inner Kernel with Explicit Accumulators
+// Alpha/beta scaling
+TEST_CASE("packed_sgemm alpha_beta_scaling") {
+    int S = 32;
+    auto A = rand_matrix(S, S, 5);
+    auto B = rand_matrix(S, S, 6);
+    std::vector<float> C_our(S*S, 1.0f);
+    std::vector<float> C_ref(S*S, 1.0f);
+    sgemm_packed(S, S, S, 2.0f, A.data(), S, B.data(), S, 0.5f, C_our.data(), S);
+    naive_sgemm(S, S, S, 2.0f, A.data(), S, B.data(), S, 0.5f, C_ref.data(), S);
+    CHECK(max_abs_diff(C_our, C_ref) < 1e-4f);
+}
 
-**File:** `src/kernels/avx_matmul.cpp` (new function `gemm_inner_8x8`)
+FILE: tests/precision/test_ulp_error.cpp
 
-This is the critical missing piece. The inner kernel must keep 8 `__m256` accumulator registers live across the K loop, loading A as scalars (broadcast) and B as full 8-wide vectors:
+Test GeLU approximation ULP error:
 
-```cpp
-// Compute C[mr×nr] += A[mr×kc] * B[kc×nr]
-// mr=6, nr=8 is optimal for AVX2 (uses 6×1 + 6 = 18 of 16 YMM registers;
-// use mr=4, nr=8 for safety to leave registers for A loads)
-// Here we implement mr=4 to be safe with register pressure
-static void gemm_inner_4x8(
-    int kc,
-    const float* __restrict__ A_panel,  // packed, [kc][4], col-major
-    const float* __restrict__ B_panel,  // packed, [kc][8], row-major
-    float* __restrict__ C,              // output slice [4][N], unpackaged
-    int N                               // stride of C
-) {
-    // 4 rows × 1 AVX register = 4 __m256 accumulators
-    __m256 c0 = _mm256_setzero_ps();
-    __m256 c1 = _mm256_setzero_ps();
-    __m256 c2 = _mm256_setzero_ps();
-    __m256 c3 = _mm256_setzero_ps();
-
-    for (int k = 0; k < kc; ++k) {
-        __m256 b = _mm256_load_ps(B_panel + k * 8);  // 8 B values, aligned
-
-        // Broadcast each A element and fuse multiply-add
-        __m256 a0 = _mm256_broadcast_ss(A_panel + k * 4 + 0);
-        __m256 a1 = _mm256_broadcast_ss(A_panel + k * 4 + 1);
-        __m256 a2 = _mm256_broadcast_ss(A_panel + k * 4 + 2);
-        __m256 a3 = _mm256_broadcast_ss(A_panel + k * 4 + 3);
-
-        c0 = _mm256_fmadd_ps(a0, b, c0);
-        c1 = _mm256_fmadd_ps(a1, b, c1);
-        c2 = _mm256_fmadd_ps(a2, b, c2);
-        c3 = _mm256_fmadd_ps(a3, b, c3);
+TEST_CASE("gelu_avx2 max ULP error < 4 in [-5, 5]") {
+    // The tanh-based GeLU approximation should have < 4 ULP error
+    // vs the exact GeLU computed with std::erf
+    const int N = 100000;
+    float max_ulp = 0.0f;
+    std::vector<float> input(N), output(N);
+    for (int i = 0; i < N; ++i) input[i] = -5.0f + 10.0f * i / N;
+    gelu_avx2(input.data(), output.data(), N);
+    for (int i = 0; i < N; ++i) {
+        float exact = 0.5f * input[i] * (1.0f + std::erff(input[i] / std::sqrt(2.0f)));
+        float ulp = std::abs(output[i] - exact) /
+                    std::numeric_limits<float>::epsilon() / std::abs(exact + 1e-10f);
+        max_ulp = std::max(max_ulp, ulp);
     }
-
-    // Accumulate into C (C may have existing partial sums from prior panels)
-    float buf[4][8] __attribute__((aligned(32)));
-    _mm256_store_ps(buf[0], c0);
-    _mm256_store_ps(buf[1], c1);
-    _mm256_store_ps(buf[2], c2);
-    _mm256_store_ps(buf[3], c3);
-    for (int i = 0; i < 4; ++i)
-        for (int j = 0; j < 8; ++j)
-            C[i * N + j] += buf[i][j];
+    // Document expected ULP budget in test output
+    MESSAGE("Max GeLU ULP error: " << max_ulp);
+    CHECK(max_ulp < 4.0f);
 }
 ```
 
-Document every variable's purpose and the register mapping in inline comments. A reviewer must be able to trace exactly which YMM register holds which piece of data.
-
-### P1-3: Derive Tile Sizes from Target Cache Capacity
-
-**File:** `src/kernels/avx_matmul.cpp` (top-of-file constants with derivation comments)
-
-Tile sizes must not be arbitrary. They must be derived from your target CPU's cache capacities, documented with the math:
-
-```cpp
-// ─── Tile size derivation ────────────────────────────────────────────────────
-// Target CPU: Intel Core (Haswell/Skylake microarchitecture, representative)
-//   L1 data cache:  32 KB = 32768 bytes, 8-way, 64-byte cache lines
-//   L2 cache:      256 KB = 262144 bytes (unified)
-//   L3 cache:        6 MB+ (shared, LLC)
-//
-// BLIS-style 3-level tiling:
-//
-//   nr = 8   (inner kernel width = 1 AVX2 register = 8 × float32)
-//   mr = 4   (inner kernel height = register pressure budget)
-//
-//   kc: A_panel [mc × kc] + B_panel [kc × nc] must fit in L2
-//       kc × nc × 4 bytes ≤ L2/2 = 131072 bytes
-//       kc × 256 × 4 = 131072  →  kc = 128
-//       (nc = 256 = 32 × nr, fits 32 B-panel strips)
-//
-//   mc: A_panel [mc × kc] must fit in L1
-//       mc × kc × 4 bytes ≤ L1/2 = 16384 bytes
-//       mc × 128 × 4 = 16384  →  mc = 32
-//
-//   nc = 256 (fits B_panel in L2 alongside working set of C)
-//
-// These values should be tuned per microarchitecture.
-// For AMD Zen 3 (L1=32KB, L2=512KB): kc=256, mc=32, nc=512.
-
-static constexpr int MR = 4;    // inner kernel height (register rows)
-static constexpr int NR = 8;    // inner kernel width (1 AVX2 register)
-static constexpr int MC = 32;   // A-panel rows (fit in L1)
-static constexpr int KC = 128;  // shared K block (fit in L2)
-static constexpr int NC = 256;  // B-panel columns (fit in L2)
-```
-
-**Every tile size constant must have a derivation comment showing the cache arithmetic.** If you change a constant, the comment must be updated to show the new math.
-
-### P1-4: Wire Packing Into the Outer Loop
-
-Replace the current tiled triple-loop outer structure with the BLIS-style 5-loop algorithm:
-
-```
-Loop 5 (jc): j = 0..N step NC
-  Pack B panel: pack_B_panel(B, Bp, K, N, 0, KC, jc, NC, NR)
-  Loop 4 (ic): i = 0..M step MC
-    Pack A panel: pack_A_panel(A, Ap, M, K, ic, MC, 0, KC, MR)
-    Loop 3 (pc): p = 0..K step KC   ← this is where B-panel packing actually belongs
-      Loop 2 (jr): j2 = 0..NC step NR
-        Loop 1 (ir): i2 = 0..MC step MR
-          gemm_inner_4x8(KC, Ap + ..., Bp + ..., C + ..., N)
-```
-
-This is the structure that enables both kernels to hit L1/L2 cache. Without this loop structure, packing is useless.
-
-### P1-5: Add Software Prefetching
-
-Inside `gemm_inner_4x8`, add prefetch hints for the next iteration's B panel data:
-
-```cpp
-// Prefetch next iteration's B data into L1 (distance = 1 panel ahead)
-if (k + 8 < kc)
-    _mm_prefetch((const char*)(B_panel + (k + 8) * 8), _MM_HINT_T0);
-```
-
-Document the prefetch distance in cycles and explain the latency you are hiding.
-
 ---
 
-## P2 — DOCUMENTATION: Write What the Prompt Actually Required
+## BLOCK 7 — CI workflows: build-and-test + bench
 
-### P2-1: Rewrite the Performance Table With Real Numbers
+**Create files:** `.github/workflows/build-and-test.yml`,
+  `.github/workflows/bench.yml`
 
-**File:** `README.md`
-
-After P0 and P1 are complete and the benchmark has been run, replace the fabricated table with actual output from `./bench` on your build machine. The table must:
-
-- Name the exact CPU (e.g., "Intel Core i7-1165G7, AVX2, 4.7 GHz boost")
-- Show naïve triple-loop cycles, `-O3` auto-vectorized cycles, and your SIMD microkernel cycles
-- Show achieved GFLOPS and utilization % of theoretical peak
-- Show sizes: at minimum 64³, 128³, 256³, 512³, 1024³
-
-The table must be labeled with the actual machine specs, not "a desktop x86 CPU." No ranges. No "~". No "Indicative only."
-
-### P2-2: Add the Cache-Arithmetic Micro-Architecture Section
-
-**File:** `README.md`
-
-Add a section titled "Memory Hierarchy & Tile Size Derivation" that explains exactly how the tile constants were chosen. Copy the derivation from the `avx_matmul.cpp` comments and expand it into prose with a table:
+**Prompt:**
 
 ```
-| Cache Level | Capacity  | Resident Data                        | Tile Constant |
-|-------------|-----------|--------------------------------------|---------------|
-| L1 (32 KB)  | 32768 B   | A panel [MC × KC × 4B] = 16 KB      | MC=32, KC=128 |
-| L2 (256 KB) | 262144 B  | B panel [KC × NC × 4B] = 131 KB     | NC=256        |
-| L3 (6+ MB)  | variable  | Full C matrix, streaming             | —             |
-```
+Create two GitHub Actions workflows.
 
-### P2-3: Add the Roofline Analysis Section
+FILE: .github/workflows/build-and-test.yml
 
-**File:** `README.md`
+name: Build and Test
 
-Add a section titled "Roofline Analysis" with the following structure:
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
 
-For each kernel (naïve GEMM, packed GEMM, GeLU), compute:
-- **Operational intensity (OI):** FLOPs ÷ bytes of memory traffic
-  - Naïve GEMM: OI ≈ N/3 FLOPs/byte for N×N matrices (low, memory-bound)
-  - Packed GEMM: OI ≈ N/2 FLOPs/byte after packing reduces traffic
-  - GeLU: OI ≈ ~10 FLOPs/byte (elementwise, clearly memory-bound)
-- **Roofline ceiling:** `min(peak_flops, peak_bandwidth × OI)`
-- **Achieved:** from the benchmark table
-- **Gap:** percentage of roofline achieved
+jobs:
+  build-linux-avx2:
+    name: Linux / GCC / AVX2
+    runs-on: ubuntu-22.04
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y cmake ninja-build libpybind11-dev \
+            python3-dev python3-pip clang-15 libopenblas-dev
+          pip install pytest numpy
 
-This analysis must use the actual measured bandwidth of your build machine (use `stream` benchmark or cite the CPU's published memory bandwidth spec).
+      - name: Configure (Release, AVX2, with OpenBLAS comparison)
+        run: |
+          cmake -S . -B build -G Ninja \
+            -DCMAKE_BUILD_TYPE=Release \
+            -DCMAKE_CXX_COMPILER=g++ \
+            -DBENCH_OPENBLAS=ON \
+            -DSIMD_ML_OPENMP=ON
 
-### P2-4: Add a `BENCHMARKS.md` File
+      - name: Build
+        run: cmake --build build --parallel
 
-Create `BENCHMARKS.md` at the repo root. This file must contain:
-- The full `./bench` output, pasted verbatim, with the build machine's CPU model, `lscpu` output, and compiler version (`g++ --version` or `clang++ --version`)
-- The CMake build flags that produced the benchmark binary (copy from `CMakeLists.txt`)
-- A note on whether Turbo Boost was enabled or disabled during measurement (for reproducibility)
+      - name: Run C++ unit tests (Release)
+        run: ctest --test-dir build -R unit_tests_release --output-on-failure
 
-No fabricated numbers. Copy-paste from an actual run.
+      - name: Run Python precision tests
+        run: |
+          pip install -e .
+          pytest tests/python/ -v
 
----
+  build-linux-asan:
+    name: Linux / Clang / ASan + UBSan
+    runs-on: ubuntu-22.04
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install
+        run: sudo apt-get install -y cmake ninja-build clang-15 libpybind11-dev python3-dev
 
-## ROADMAP.md — Required Entries
+      - name: Configure (ASAN)
+        run: |
+          cmake -S . -B build_asan -G Ninja \
+            -DCMAKE_BUILD_TYPE=RelWithDebInfo \
+            -DCMAKE_CXX_COMPILER=clang++-15
 
-Create `ROADMAP.md` at the repo root. Entries must be honest about current status:
+      - name: Build ASAN target
+        run: cmake --build build_asan --target tests_asan
 
-```markdown
-# Roadmap
+      - name: Run ASAN tests
+        run: |
+          ASAN_OPTIONS=detect_leaks=1:abort_on_error=1 \
+          UBSAN_OPTIONS=print_stacktrace=1 \
+          ctest --test-dir build_asan -R unit_tests_asan --output-on-failure
 
-## Legend
-✅ Complete + verified   ⚠️ Partial   ❌ Not started
+  build-macos:
+    name: macOS / Apple Clang / Scalar fallback
+    runs-on: macos-14   # Apple Silicon — no AVX2
+    steps:
+      - uses: actions/checkout@v4
+      - run: brew install cmake pybind11
+      - name: Configure
+        run: cmake -S . -B build -DCMAKE_BUILD_TYPE=Release
+      - name: Build
+        run: cmake --build build --parallel
+      - name: Test (scalar fallback path)
+        run: ctest --test-dir build --output-on-failure
+        # On ARM, dispatcher must select scalar fallback — test this explicitly
 
----
+FILE: .github/workflows/bench.yml
 
-## v0.2 — Correctness & Measurement Foundation (current target)
-- [❌] -ffast-math removed from precision test targets (Fix 1)
-- [❌] Buffer contiguity validation in Python bindings (Fix 2)
-- [❌] TSC frequency calibration (P0-1)
-- [❌] CPUID/lfence-serialized RDTSC (P0-2)
-- [❌] CPU affinity pinning (P0-3)
-- [❌] Real GFLOPS output with utilization % (P0-4)
+name: Weekly Benchmark
 
-## v0.3 — True GEMM Microkernel
-- [❌] Matrix B panel packing (P1-1)
-- [❌] Matrix A panel packing (P1-1)
-- [❌] 4×8 AVX2 inner kernel with explicit accumulators (P1-2)
-- [❌] Cache-derived tile size constants with derivation comments (P1-3)
-- [❌] BLIS-style 5-loop outer structure (P1-4)
-- [❌] Software prefetching in inner loop (P1-5)
+on:
+  schedule:
+    - cron: '0 4 * * 0'   # Every Sunday at 4 AM UTC
+  workflow_dispatch:        # Also runnable manually
 
-## v0.4 — Verified Performance Documentation
-- [❌] Real benchmark table with CPU model and measured GFLOPS (P2-1)
-- [❌] Cache-arithmetic derivation in README (P2-2)
-- [❌] Roofline analysis section in README (P2-3)
-- [❌] BENCHMARKS.md with verbatim bench output (P2-4)
+jobs:
+  bench:
+    name: Benchmark smoke
+    runs-on: ubuntu-22.04
+    steps:
+      - uses: actions/checkout@v4
+      - name: Build with OpenBLAS
+        run: |
+          sudo apt-get install -y cmake libopenblas-dev ninja-build libpybind11-dev python3-dev
+          cmake -S . -B build -G Ninja -DCMAKE_BUILD_TYPE=Release -DBENCH_OPENBLAS=ON
+          cmake --build build --parallel
 
-## v0.5 — AVX-512 Specialization
-- [❌] 4×16 AVX-512 inner kernel (NR=16, __m512 accumulators)
-- [❌] Runtime CPU dispatch: detect AVX-512 at startup, dispatch to right kernel
-- [❌] Updated tile sizes for AVX-512 (NR=16 changes NC arithmetic)
-- [❌] Benchmark comparison: AVX2 vs AVX-512 on same matrix sizes
+      - name: Run benchmark (no freq lock on GH Actions runner)
+        run: |
+          # Note: GitHub Actions runners are noisy; these numbers are for
+          # regression detection only, not absolute performance claims
+          ./build/bench_gemm --sizes "64,128,256" --iterations 200 \
+            --output benchmarks/results/ci_gemm_results.json
 
-## v0.6 — Extended Kernels
-- [❌] Multithreaded GEMM via OpenMP across outer jc loop
-- [❌] NUMA-aware allocation for dual-socket systems
-- [❌] BF16 accumulation kernel (relevant for modern ML inference)
-- [❌] Benchmark against OpenBLAS (single-threaded, matched build flags)
+      - name: Upload results
+        uses: actions/upload-artifact@v4
+        with:
+          name: bench-results-${{ github.sha }}
+          path: benchmarks/results/ci_gemm_results.json
+          retention-days: 90
 
-## Known Honest Limitations (never remove this section)
-- No matrix packing until v0.3: kernel is cache-blocked loop, not a microkernel
-- Performance numbers are fabricated ranges until v0.4; do not cite them
-- GeLU precision test validity uncertain until Fix 1 is applied
-- AVX-512 flag is enabled in CMake but no AVX-512-width kernel code exists
+      - name: Performance regression check
+        run: python benchmarks/check_regression.py \
+          --baseline benchmarks/results/gemm_results.json \
+          --current  benchmarks/results/ci_gemm_results.json \
+          --max-regression-pct 15
+        # Fail if throughput drops >15% vs committed baseline
 ```
 
 ---
 
-## RULES FOR THE AGENT
+## BLOCK 8 — Dockerfile for reproducible builds
 
-1. **Do not update the performance table in README.md until you have run `./bench` on a real machine and have actual output.** If you cannot run on a GPU/AVX2 machine, add a clearly labeled `[NOT YET MEASURED — CPU UNAVAILABLE]` placeholder. Do not invent numbers.
+**Create file:** `Dockerfile`
 
-2. **The `gemm_inner_4x8` function must have a comment for every intrinsic call** explaining which register holds what data. A reader who does not know the function's purpose must be able to deduce it from the comments alone.
+**Prompt:**
 
-3. **Every tile size constant must have its cache arithmetic derivation in the comment.** `constexpr int KC = 128;` with no comment is unacceptable.
+```
+Create a Dockerfile that builds the complete project from scratch with all
+dependencies pinned to exact versions for full reproducibility.
 
-4. **Do not add AVX-512 kernel code until the AVX2 kernel is verified correct** against the NumPy reference with `max_abs_error < 1e-4` across sizes 64³, 128³, 256³. An incorrect but wider kernel is worse than a correct narrow one.
+FROM ubuntu:22.04
 
-5. **The order of work is Fix 1 + Fix 2 → P0 → P1 → P2.** Do not write roofline analysis before you have real benchmark numbers. Do not write a performance table before the calibrated harness exists.
+LABEL maintainer="Min Htet Myet"
+LABEL description="IntrinsicML SIMD microkernel development environment"
 
-6. **Every CI-gated test must pass on a CPU without AVX2** by falling back to scalar paths. The CMake AVX2 detection block already handles this for the library; ensure the test suite also has a scalar fallback for machines where `COMPILER_HAS_AVX2` is false.
+ARG GCC_VERSION=12
+ARG CMAKE_VERSION=3.28.0
+
+# Prevent interactive prompts
+ENV DEBIAN_FRONTEND=noninteractive
+
+# Pin all package versions
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    gcc-${GCC_VERSION}=12.3.0-1ubuntu1~22.04 \
+    g++-${GCC_VERSION}=12.3.0-1ubuntu1~22.04 \
+    python3.11=3.11.0~rc1-1~22.04 \
+    python3.11-dev=3.11.0~rc1-1~22.04 \
+    python3-pip \
+    ninja-build \
+    libopenblas-dev \
+    numactl \
+    linux-tools-generic \     # for perf
+    && rm -rf /var/lib/apt/lists/*
+
+# Install exact CMake version
+RUN pip install cmake==${CMAKE_VERSION}
+
+# pybind11 via pip (version-pinned)
+RUN pip install pybind11==2.11.1 numpy==1.26.0 pytest==7.4.0
+
+# Set GCC as default
+RUN update-alternatives --install /usr/bin/gcc gcc /usr/bin/gcc-${GCC_VERSION} 100 \
+    && update-alternatives --install /usr/bin/g++ g++ /usr/bin/g++-${GCC_VERSION} 100
+
+WORKDIR /workspace
+COPY . .
+
+# Build with all features
+RUN cmake -S . -B build -G Ninja \
+    -DCMAKE_BUILD_TYPE=Release \
+    -DSIMD_ML_OPENMP=ON \
+    -DBENCH_OPENBLAS=ON \
+    && cmake --build build --parallel
+
+# Default: run tests
+CMD ["ctest", "--test-dir", "build", "--output-on-failure"]
+
+# To run benchmarks:
+# docker run --rm intrinsicml bash benchmarks/run_suite.sh
+```
 
 ---
 
+## BLOCK 9 — Documentation: DESIGN.md and algorithm comments
+
+**Create file:** `DESIGN.md`
+
+**Prompt:**
+
+```
+Create a DESIGN.md that explains the mathematical and architectural decisions
+at a level appropriate for a systems engineer or compiler team interview.
+
+DESIGN.md sections:
+
+## 1. The GEMM Performance Problem
+- Why naive triple-loop is slow (GFLOPS << peak)
+- The roofline model: compute-bound vs memory-bandwidth-bound
+- For FP32 GEMM at large N: arithmetic intensity = N/2 FLOP/byte →
+  becomes compute-bound for N > 128 (show the calculation)
+
+## 2. The Goto Algorithm
+- Three-level cache tiling rationale (with the actual formulas for MC/NC/KC)
+- Why packing eliminates TLB thrashing
+- Diagram: data flow through L1/L2/L3 cache during GEMM
+- The 8×8 register block: why 8 is the right number for AVX2
+  (16 YMM registers − 2 for A/B loads = 14 accumulators → round to 8×1 or 4×2)
+
+## 3. AVX2 Register Blocking
+- YMM register layout for FP32 GEMM
+- FMA latency hiding: why the accumulator dimension is > 1
+  (FMA latency = 4 cycles on Haswell/Zen → need 4 independent accumulators
+   to saturate the FMA port at 1 FMA/cycle throughput)
+- Show the inner kernel structure: 8 accumulators, 2 loads per iter
+
+## 4. Activation Function Numerics
+- GeLU approximation error budget (ULP analysis)
+- SiLU exp approximation: range reduction + Horner polynomial
+- Softmax numerical stability: why subtract max (avoid overflow)
+
+## 5. Performance Model
+- Theoretical peak: 2 × freq × lanes × fma_depth
+  For 3.6 GHz / AVX2 / single-core: 3.6 × 16 = 57.6 GFLOPS
+- Expected efficiency: ~65–75% of peak with good packing
+- Comparison with OpenBLAS: OpenBLAS uses prefetching and architecture-tuned
+  tile sizes; we aim for 70–80% of OpenBLAS as an educational target
+
+## 6. What Is Missing vs Production
+- Hardware prefetching hints (PREFETCHNTA/PREFETCHT0)
+- NUMA-aware allocation
+- Architecture-specific tuning (Skylake vs Zen4 have different cache sizes)
+- Int8/BF16 kernels (increasingly important for LLM inference)
+- AMX (Advanced Matrix Extensions) for future work
+
+Also update every source file header comment to reference the relevant
+DESIGN.md section number. Example:
+
+avx2_gemm_packed.cpp header:
+  // Packed SGEMM using the Goto/BLIS algorithm.
+  // See DESIGN.md §2 for algorithm rationale and §3 for register blocking.
+  // Tile sizes (MC=128, KC=256, NC=2048) chosen per DESIGN.md §2 cache model.
+```
+
+---
+
+## BLOCK 10 — Python API: expand pybind11 bindings + type stubs
+
+**File to modify:** `src/bindings/pybind_entry.cpp`
+**Create file:** `simd_kernels.pyi`
+
+**Prompt:**
+
+```
+Expand the Python bindings to expose all new kernels and add type stubs
+for IDE support.
+
+FILE: src/bindings/pybind_entry.cpp (expand)
+
+Expose:
+  simd_kernels.sgemm(A: np.ndarray, B: np.ndarray,
+                     alpha: float = 1.0, beta: float = 0.0,
+                     C: Optional[np.ndarray] = None) -> np.ndarray
+  # Validates: A/B must be float32, C-contiguous, 2D
+  # Returns float32 C-contiguous result array
+  # Error message must be specific: "A must be float32 C-contiguous 2D array"
+
+  simd_kernels.gelu(x: np.ndarray) -> np.ndarray
+  simd_kernels.relu(x: np.ndarray) -> np.ndarray
+  simd_kernels.silu(x: np.ndarray) -> np.ndarray
+  simd_kernels.softmax(x: np.ndarray, axis: int = -1) -> np.ndarray
+
+  simd_kernels.detected_isa() -> str  # "avx512", "avx2", "sse42", "scalar"
+  simd_kernels.build_info() -> dict   # existing, but expand
+  simd_kernels.set_num_threads(n: int) -> None
+  simd_kernels.get_num_threads() -> int
+
+Array input contract (enforce via pybind11):
+  - Must be float32
+  - Must be C-contiguous (F-contiguous triggers a copy with a warning)
+  - Must be non-empty
+  - For sgemm: A.shape[1] must == B.shape[0]
+
+FILE: simd_kernels.pyi  (Python type stub for IDE/mypy support)
+
+from typing import Optional
+import numpy as np
+from numpy.typing import NDArray
+
+def sgemm(A: NDArray[np.float32], B: NDArray[np.float32],
+          alpha: float = ..., beta: float = ...,
+          C: Optional[NDArray[np.float32]] = ...) -> NDArray[np.float32]: ...
+
+def gelu(x: NDArray[np.float32]) -> NDArray[np.float32]: ...
+def relu(x: NDArray[np.float32]) -> NDArray[np.float32]: ...
+def silu(x: NDArray[np.float32]) -> NDArray[np.float32]: ...
+def softmax(x: NDArray[np.float32], axis: int = ...) -> NDArray[np.float32]: ...
+def detected_isa() -> str: ...
+def build_info() -> dict: ...
+def set_num_threads(n: int) -> None: ...
+def get_num_threads() -> int: ...
+
+Update tests/python/test_precision.py to add:
+  - test_sgemm_agrees_numpy: simd_kernels.sgemm(A, B) must agree with
+    np.float32(np.matmul(A.astype(float), B.astype(float))) within 1e-4
+  - test_softmax_agrees_scipy: simd_kernels.softmax(x) must agree with
+    scipy.special.softmax(x) within 1e-5
+  - test_type_error_on_float64: passing float64 array must raise TypeError
+  - test_contiguous_check: F-contiguous input is handled without crash
+```
+
+---
+
+## BLOCK 11 — README overhaul and BENCHMARKS.md
+
+**Files to replace:** `README.md`
+**Create:** `BENCHMARKS.md`, `CITATION.cff`
+
+**Prompt:**
+
+```
+Rewrite README.md for FAANG/systems-engineer audience. Remove ALL
+self-deprecating disclaimers. Replace them with honest, specific claims
+backed by committed benchmark results.
+
+README.md structure:
+
+## Badges (row 1)
+  CI | License | C++ Standard | AVX2/AVX-512 | Python | Stars
+
+## Tagline (1 sentence)
+  "A from-scratch implementation of packed SGEMM, GeLU, SiLU, Softmax,
+   and online attention using AVX2/AVX-512 intrinsics — achieving ~70%
+   of OpenBLAS single-core throughput via the Goto algorithm."
+
+## Performance (lead with this — it is what engineers look at first)
+  Show the benchmark table from BENCHMARKS.md.
+  Use actual committed numbers, NOT "illustrative".
+  Column: Size | Our GFLOPS | OpenBLAS GFLOPS | % of Peak | % of OpenBLAS
+  Note: "Benchmarked on [CPU]. Regenerate: bash benchmarks/run_suite.sh"
+
+## What This Implements
+  Table: Kernel | ISA | Status | Paper/Reference
+  avx2_gemm_packed | AVX2/FMA | ✅ | Goto & van de Geijn 2008
+  avx2_gemm_packed | AVX-512 | ✅ | ...
+  gelu_avx2 | AVX2 | ✅ | Hendrycks & Gimpel 2016
+  silu_avx2 | AVX2 | ✅ | Ramachandran et al. 2017
+  softmax_avx2 | AVX2 | ✅ | Milakov & Gimelshein 2018
+  flash_attention_v1 | AVX2 | 🚧 | Dao et al. 2022
+
+## Algorithm Design
+  "See DESIGN.md for the roofline model, cache tiling rationale,
+   and register blocking analysis."
+  (Two paragraph summary, then link)
+
+## Quick Start
+  git clone ...
+  mkdir build && cd build
+  cmake .. -DCMAKE_BUILD_TYPE=Release
+  cmake --build . --parallel
+  ./bench_gemm
+
+  # Python:
+  pip install -e .
+  python -c "import simd_kernels; print(simd_kernels.detected_isa())"
+
+## Limitations (honest, specific, not dismissive)
+  "Compared to OpenBLAS and MKL, this implementation omits: hardware
+   prefetch hints, architecture-specific tile tuning (we use static sizes
+   rather than runtime L-cache probing), and NUMA-aware allocation.
+   These gaps account for the remaining 20–30% gap vs OpenBLAS.
+   See DESIGN.md §6 for details."
+
+## References
+  [1] Goto & van de Geijn (2008) — The Goto algorithm (DESIGN.md §2)
+  [2] BLIS framework: Smith et al. (2014)
+  [3] Hendrycks & Gimpel (2016) — GeLU
+  [4] Dao et al. (2022) — FlashAttention
+
+FILE: CITATION.cff
+  cff-version: "1.2.0"
+  title: "IntrinsicML: SIMD Microkernels for ML Workloads"
+  authors: [{family-names: "Myet", given-names: "Min Htet"}]
+  version: "2.0.0"
+  license: MIT
+  repository-code: "https://github.com/Mattral/SIMD-Microkernels-for-ML-Workloads"
+  keywords: [simd, avx2, avx-512, gemm, machine-learning, microkernels, cpp]
+  preferred-citation:
+    type: software
+    title: IntrinsicML
+    doi: (add Zenodo DOI after publishing)
+```
+
+---
+
+## MASTER CHECKLIST
+
+Create as GitHub Issue "v2.0.0 upgrade tracker":
+
+**P0 — Core algorithmic gaps (do first, they change the repo's identity)**
+- [ ] BLOCK 1: Packed GEMM (Goto algorithm) — avx2_gemm_packed.cpp
+- [ ] BLOCK 2: Runtime ISA dispatcher (cpuid + kernel_registry)
+- [ ] BLOCK 5: Production benchmark harness (GFLOPS + OpenBLAS comparison)
+- [ ] Commit actual benchmark results to benchmarks/results/
+
+**P1 — Completeness**
+- [ ] BLOCK 3: ReLU, SiLU, Softmax kernels
+- [ ] BLOCK 4: OpenMP multithreading
+- [ ] BLOCK 6: C++ unit tests with doctest + ASan/UBSan
+- [ ] BLOCK 7: CI workflows (build-and-test + bench)
+
+**P2 — Polish**
+- [ ] BLOCK 8: Dockerfile
+- [ ] BLOCK 9: DESIGN.md
+- [ ] BLOCK 10: Expanded pybind11 bindings + .pyi type stubs
+- [ ] BLOCK 11: README overhaul + BENCHMARKS.md + CITATION.cff
+
+---
+
+## ANSWERED QUESTIONS — SUMMARY TABLE
+
+| Question | Answer | Rationale |
+|---|---|---|
+| 100% test coverage? | 95% on kernel source, 100% on public API | Kernel code needs ULP/precision testing, not branch padding |
+| CI? | Yes — 3 jobs: AVX2, ASan, macOS ARM scalar fallback | Catches UB, platform-specific bugs, and performance regressions |
+| Docker? | Yes — one Dockerfile, pinned GCC + CMake | Reproducible builds without local toolchain setup |
+| Rust? | No rewrite — optional thin PyO3 wrapper only | C++ intrinsics are the right tool; Rust SIMD is less mature for this use case |
+| How to evaluate? | GFLOPS p50/p95/p99 vs OpenBLAS, % of theoretical peak | Industry-standard metric, hardware-independent, comparable across machines |
+| How to document? | DESIGN.md (roofline model, cache tiling, register blocking) + source file headers referencing DESIGN.md sections | Signals systems depth to compiler/hardware team interviewers |
+| How to be top-tier? | Implement packed GEMM, commit real OpenBLAS comparison numbers, add runtime ISA dispatch | These three moves transform it from "demo" to "credible reference" |
+
+---
+
+*End of SIMD-Microkernels Copilot Upgrade Instructions — v2.0 target*

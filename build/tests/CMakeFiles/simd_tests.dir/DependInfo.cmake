@@ -11,6 +11,7 @@ set(CMAKE_DEPENDS_DEPENDENCY_FILES
   "/workspaces/SIMD-Microkernels-for-ML-Workloads/tests/test_alignment.cpp" "tests/CMakeFiles/simd_tests.dir/test_alignment.cpp.o" "gcc" "tests/CMakeFiles/simd_tests.dir/test_alignment.cpp.o.d"
   "/workspaces/SIMD-Microkernels-for-ML-Workloads/tests/test_gelu.cpp" "tests/CMakeFiles/simd_tests.dir/test_gelu.cpp.o" "gcc" "tests/CMakeFiles/simd_tests.dir/test_gelu.cpp.o.d"
   "/workspaces/SIMD-Microkernels-for-ML-Workloads/tests/test_gemm.cpp" "tests/CMakeFiles/simd_tests.dir/test_gemm.cpp.o" "gcc" "tests/CMakeFiles/simd_tests.dir/test_gemm.cpp.o.d"
+  "/workspaces/SIMD-Microkernels-for-ML-Workloads/tests/test_gemm_packed.cpp" "tests/CMakeFiles/simd_tests.dir/test_gemm_packed.cpp.o" "gcc" "tests/CMakeFiles/simd_tests.dir/test_gemm_packed.cpp.o.d"
   )
 
 # Targets to which this target links which contain Fortran sources.

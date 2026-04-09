@@ -97,19 +97,35 @@ CMakeFiles/simd_kernels_lib.dir/src/kernels/intrinsic_gelu.cpp.s: cmake_force
 	@$(CMAKE_COMMAND) -E cmake_echo_color "--switch=$(COLOR)" --green "Compiling CXX source to assembly CMakeFiles/simd_kernels_lib.dir/src/kernels/intrinsic_gelu.cpp.s"
 	/usr/bin/c++ $(CXX_DEFINES) $(CXX_INCLUDES) $(CXX_FLAGS) -S /workspaces/SIMD-Microkernels-for-ML-Workloads/src/kernels/intrinsic_gelu.cpp -o CMakeFiles/simd_kernels_lib.dir/src/kernels/intrinsic_gelu.cpp.s
 
+CMakeFiles/simd_kernels_lib.dir/src/kernels/gemm/avx2_gemm_packed.cpp.o: CMakeFiles/simd_kernels_lib.dir/flags.make
+CMakeFiles/simd_kernels_lib.dir/src/kernels/gemm/avx2_gemm_packed.cpp.o: /workspaces/SIMD-Microkernels-for-ML-Workloads/src/kernels/gemm/avx2_gemm_packed.cpp
+CMakeFiles/simd_kernels_lib.dir/src/kernels/gemm/avx2_gemm_packed.cpp.o: CMakeFiles/simd_kernels_lib.dir/compiler_depend.ts
+	@$(CMAKE_COMMAND) -E cmake_echo_color "--switch=$(COLOR)" --green --progress-dir=/workspaces/SIMD-Microkernels-for-ML-Workloads/build/CMakeFiles --progress-num=$(CMAKE_PROGRESS_3) "Building CXX object CMakeFiles/simd_kernels_lib.dir/src/kernels/gemm/avx2_gemm_packed.cpp.o"
+	/usr/bin/c++ $(CXX_DEFINES) $(CXX_INCLUDES) $(CXX_FLAGS) -MD -MT CMakeFiles/simd_kernels_lib.dir/src/kernels/gemm/avx2_gemm_packed.cpp.o -MF CMakeFiles/simd_kernels_lib.dir/src/kernels/gemm/avx2_gemm_packed.cpp.o.d -o CMakeFiles/simd_kernels_lib.dir/src/kernels/gemm/avx2_gemm_packed.cpp.o -c /workspaces/SIMD-Microkernels-for-ML-Workloads/src/kernels/gemm/avx2_gemm_packed.cpp
+
+CMakeFiles/simd_kernels_lib.dir/src/kernels/gemm/avx2_gemm_packed.cpp.i: cmake_force
+	@$(CMAKE_COMMAND) -E cmake_echo_color "--switch=$(COLOR)" --green "Preprocessing CXX source to CMakeFiles/simd_kernels_lib.dir/src/kernels/gemm/avx2_gemm_packed.cpp.i"
+	/usr/bin/c++ $(CXX_DEFINES) $(CXX_INCLUDES) $(CXX_FLAGS) -E /workspaces/SIMD-Microkernels-for-ML-Workloads/src/kernels/gemm/avx2_gemm_packed.cpp > CMakeFiles/simd_kernels_lib.dir/src/kernels/gemm/avx2_gemm_packed.cpp.i
+
+CMakeFiles/simd_kernels_lib.dir/src/kernels/gemm/avx2_gemm_packed.cpp.s: cmake_force
+	@$(CMAKE_COMMAND) -E cmake_echo_color "--switch=$(COLOR)" --green "Compiling CXX source to assembly CMakeFiles/simd_kernels_lib.dir/src/kernels/gemm/avx2_gemm_packed.cpp.s"
+	/usr/bin/c++ $(CXX_DEFINES) $(CXX_INCLUDES) $(CXX_FLAGS) -S /workspaces/SIMD-Microkernels-for-ML-Workloads/src/kernels/gemm/avx2_gemm_packed.cpp -o CMakeFiles/simd_kernels_lib.dir/src/kernels/gemm/avx2_gemm_packed.cpp.s
+
 # Object files for target simd_kernels_lib
 simd_kernels_lib_OBJECTS = \
 "CMakeFiles/simd_kernels_lib.dir/src/kernels/avx_matmul.cpp.o" \
-"CMakeFiles/simd_kernels_lib.dir/src/kernels/intrinsic_gelu.cpp.o"
+"CMakeFiles/simd_kernels_lib.dir/src/kernels/intrinsic_gelu.cpp.o" \
+"CMakeFiles/simd_kernels_lib.dir/src/kernels/gemm/avx2_gemm_packed.cpp.o"
 
 # External object files for target simd_kernels_lib
 simd_kernels_lib_EXTERNAL_OBJECTS =
 
 libsimd_kernels_lib.a: CMakeFiles/simd_kernels_lib.dir/src/kernels/avx_matmul.cpp.o
 libsimd_kernels_lib.a: CMakeFiles/simd_kernels_lib.dir/src/kernels/intrinsic_gelu.cpp.o
+libsimd_kernels_lib.a: CMakeFiles/simd_kernels_lib.dir/src/kernels/gemm/avx2_gemm_packed.cpp.o
 libsimd_kernels_lib.a: CMakeFiles/simd_kernels_lib.dir/build.make
 libsimd_kernels_lib.a: CMakeFiles/simd_kernels_lib.dir/link.txt
-	@$(CMAKE_COMMAND) -E cmake_echo_color "--switch=$(COLOR)" --green --bold --progress-dir=/workspaces/SIMD-Microkernels-for-ML-Workloads/build/CMakeFiles --progress-num=$(CMAKE_PROGRESS_3) "Linking CXX static library libsimd_kernels_lib.a"
+	@$(CMAKE_COMMAND) -E cmake_echo_color "--switch=$(COLOR)" --green --bold --progress-dir=/workspaces/SIMD-Microkernels-for-ML-Workloads/build/CMakeFiles --progress-num=$(CMAKE_PROGRESS_4) "Linking CXX static library libsimd_kernels_lib.a"
 	$(CMAKE_COMMAND) -P CMakeFiles/simd_kernels_lib.dir/cmake_clean_target.cmake
 	$(CMAKE_COMMAND) -E cmake_link_script CMakeFiles/simd_kernels_lib.dir/link.txt --verbose=$(VERBOSE)
 

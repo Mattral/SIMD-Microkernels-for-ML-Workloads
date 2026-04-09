@@ -5,6 +5,8 @@ file(REMOVE_RECURSE
   "CMakeFiles/simd_tests.dir/test_gelu.cpp.o.d"
   "CMakeFiles/simd_tests.dir/test_gemm.cpp.o"
   "CMakeFiles/simd_tests.dir/test_gemm.cpp.o.d"
+  "CMakeFiles/simd_tests.dir/test_gemm_packed.cpp.o"
+  "CMakeFiles/simd_tests.dir/test_gemm_packed.cpp.o.d"
   "simd_tests"
   "simd_tests.pdb"
 )
