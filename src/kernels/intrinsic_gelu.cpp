@@ -131,3 +131,13 @@ void gelu_forward_scalar(const float* input,
         output[i] = 0.5f * x * (1.0f + std::erff(x * INV_SQRT2));
     }
 }
+
+namespace simd_ml {
+namespace activations {
+
+void gelu_avx2(const float* input, float* output, int n) {
+    gelu_forward_avx2(input, output, static_cast<std::size_t>(n));
+}
+
+} // namespace activations
+} // namespace simd_ml

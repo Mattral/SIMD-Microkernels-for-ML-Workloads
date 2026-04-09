@@ -420,6 +420,7 @@ CMakeFiles/simd_kernels.dir/src/bindings/pybind_entry.cpp.o: \
  /usr/include/c++/13/bits/stl_numeric.h \
  /usr/include/c++/13/pstl/glue_numeric_defs.h \
  /workspaces/SIMD-Microkernels-for-ML-Workloads/src/bindings/../kernels/activations/activations.hpp \
+ /workspaces/SIMD-Microkernels-for-ML-Workloads/src/bindings/../kernels/gemm/avx2_gemm_packed.hpp \
  /workspaces/SIMD-Microkernels-for-ML-Workloads/src/bindings/../kernels/intrinsic_gelu.hpp \
  /workspaces/SIMD-Microkernels-for-ML-Workloads/src/bindings/../kernels/cache_alloc.hpp \
  /workspaces/SIMD-Microkernels-for-ML-Workloads/src/bindings/../dispatch/kernel_registry.hpp
