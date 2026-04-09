@@ -49,9 +49,10 @@
 #include <stdexcept>
 #include <string>
 
-#include "../kernels/avx_matmul.hpp"
+#include "../kernels/activations/activations.hpp"
 #include "../kernels/intrinsic_gelu.hpp"
 #include "../kernels/cache_alloc.hpp"
+#include "../dispatch/kernel_registry.hpp"
 
 namespace py = pybind11;
 
@@ -122,12 +123,12 @@ static void py_sgemm(py::array A,
     // Release GIL during the (potentially long) GEMM computation
     {
         py::gil_scoped_release release;
-        simd_sgemm(M, N, K,
-                   alpha,
-                   static_cast<const float*>(A.data()), K,
-                   static_cast<const float*>(B.data()), N,
-                   beta,
-                   static_cast<float*>(C.mutable_data()), N);
+        simd_ml::dispatch::sgemm(M, N, K,
+                                 alpha,
+                                 static_cast<const float*>(A.data()), K,
+                                 static_cast<const float*>(B.data()), N,
+                                 beta,
+                                 static_cast<float*>(C.mutable_data()), N);
     }
 }
 
@@ -175,6 +176,74 @@ static py::array_t<float> py_gelu(py::array x) {
     return out;
 }
 
+static py::array_t<float> py_relu(py::array x) {
+    validate_array(x, "x");
+    std::size_t n = static_cast<std::size_t>(x.size());
+    py::array_t<float> out(x.request().shape);
+    {
+        py::gil_scoped_release release;
+        activations::relu_avx2(static_cast<const float*>(x.data()), out.mutable_data(), static_cast<int>(n));
+    }
+    return out;
+}
+
+static py::array_t<float> py_silu(py::array x) {
+    validate_array(x, "x");
+    std::size_t n = static_cast<std::size_t>(x.size());
+    py::array_t<float> out(x.request().shape);
+    {
+        py::gil_scoped_release release;
+        activations::silu_avx2(static_cast<const float*>(x.data()), out.mutable_data(), static_cast<int>(n));
+    }
+    return out;
+}
+
+static py::array_t<float> py_softmax(py::array x, int axis = -1) {
+    validate_array(x, "x");
+    if (x.ndim() < 1) {
+        throw std::runtime_error("softmax requires a non-empty array");
+    }
+    int ndim = x.ndim();
+    if (axis < 0) axis += ndim;
+    if (axis < 0 || axis >= ndim) {
+        throw std::runtime_error("softmax axis out of range");
+    }
+    if (axis != ndim - 1) {
+        throw std::runtime_error("softmax currently supports the last axis only");
+    }
+
+    auto buf = x.request();
+    py::array_t<float> out(buf.shape);
+    float* out_ptr = out.mutable_data();
+    const float* in_ptr = static_cast<const float*>(x.data());
+    int row_size = static_cast<int>(buf.shape[ndim - 1]);
+    int rows = 1;
+    for (int i = 0; i < ndim - 1; ++i) {
+        rows = static_cast<int>(rows * buf.shape[i]);
+    }
+
+    {
+        py::gil_scoped_release release;
+        for (int r = 0; r < rows; ++r) {
+            const float* row_in = in_ptr + static_cast<std::size_t>(r) * row_size;
+            float* row_out = out_ptr + static_cast<std::size_t>(r) * row_size;
+            activations::softmax_row_avx2(row_in, row_out, row_size);
+        }
+    }
+    return out;
+}
+
+static void py_set_num_threads(int n) {
+    if (n <= 0) {
+        throw std::invalid_argument("num_threads must be positive");
+    }
+    simd_ml::gemm::set_num_threads(n);
+}
+
+static int py_get_num_threads() {
+    return simd_ml::gemm::get_num_threads();
+}
+
 // ─── Binding: build_info ──────────────────────────────────────────────────────
 static std::string build_info() {
     std::string info = "SIMD-ML-Microkernels build info:\n";
@@ -190,6 +259,7 @@ static std::string build_info() {
 #endif
     info += "  Alignment:   64-byte (posix_memalign / _aligned_malloc)\n";
     info += "  Build:       " __DATE__ " " __TIME__ "\n";
+    info += "  Runtime ISA: " + std::string(simd_ml::dispatch::detected_isa()) + "\n";
     return info;
 }
 
@@ -247,9 +317,32 @@ Out-of-place AVX2-vectorized GeLU activation.
 Returns a new array GeLU(x).  Input x is not modified.
 )doc");
 
+    m.def("relu", &py_relu,
+          py::arg("x"),
+          "Return ReLU(x) computed with AVX2 vectorization.");
+
+    m.def("silu", &py_silu,
+          py::arg("x"),
+          "Return SiLU(x) computed with AVX2 vectorization.");
+
+    m.def("softmax", &py_softmax,
+          py::arg("x"), py::arg("axis") = -1,
+          "Return row-wise softmax over the last axis.");
+
+    m.def("set_num_threads", &py_set_num_threads,
+          py::arg("n"),
+          "Set the number of OpenMP threads used by GEMM.");
+
+    m.def("get_num_threads", &py_get_num_threads,
+          "Return the current OpenMP thread count used by GEMM.");
+
     m.def("build_info", &build_info,
           "Return a string describing the compiled ISA and build configuration.");
 
+    m.def("detected_isa", []() {
+        // Return the runtime-dispatched ISA label selected by the kernel
+        return std::string(simd_ml::dispatch::detected_isa());
+    }, "Return the detected ISA label (avx512|avx2|sse42|scalar)");
     m.def("is_aligned", &py_is_aligned,
           py::arg("arr"),
           "Return True if the array's data buffer is 64-byte aligned.");

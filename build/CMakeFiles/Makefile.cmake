@@ -7,6 +7,11 @@ set(CMAKE_DEPENDS_GENERATOR "Unix Makefiles")
 # The top level Makefile was generated from the following files:
 set(CMAKE_MAKEFILE_DEPENDS
   "CMakeCache.txt"
+  "/home/codespace/.python/current/lib/python3.12/site-packages/pybind11/share/cmake/pybind11/pybind11Common.cmake"
+  "/home/codespace/.python/current/lib/python3.12/site-packages/pybind11/share/cmake/pybind11/pybind11Config.cmake"
+  "/home/codespace/.python/current/lib/python3.12/site-packages/pybind11/share/cmake/pybind11/pybind11ConfigVersion.cmake"
+  "/home/codespace/.python/current/lib/python3.12/site-packages/pybind11/share/cmake/pybind11/pybind11NewTools.cmake"
+  "/home/codespace/.python/current/lib/python3.12/site-packages/pybind11/share/cmake/pybind11/pybind11Targets.cmake"
   "/usr/share/cmake-3.28/Modules/CMakeCXXInformation.cmake"
   "/usr/share/cmake-3.28/Modules/CMakeCheckCompilerFlagCommonPatterns.cmake"
   "/usr/share/cmake-3.28/Modules/CMakeCommonLanguageInclude.cmake"
@@ -55,6 +60,7 @@ set(CMAKE_MAKEFILE_PRODUCTS
 # Dependency information for all targets:
 set(CMAKE_DEPEND_INFO_FILES
   "CMakeFiles/simd_kernels_lib.dir/DependInfo.cmake"
+  "CMakeFiles/simd_kernels.dir/DependInfo.cmake"
   "CMakeFiles/bench.dir/DependInfo.cmake"
   "tests/CMakeFiles/simd_kernels_precision_lib.dir/DependInfo.cmake"
   "tests/CMakeFiles/simd_tests.dir/DependInfo.cmake"

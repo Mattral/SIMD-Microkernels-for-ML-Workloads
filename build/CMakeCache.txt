@@ -115,6 +115,9 @@ CMAKE_OBJCOPY:FILEPATH=/usr/bin/objcopy
 //Path to a program.
 CMAKE_OBJDUMP:FILEPATH=/usr/bin/objdump
 
+//No help, variable specified on the command line.
+CMAKE_PREFIX_PATH:UNINITIALIZED=/home/codespace/.python/current/lib/python3.12/site-packages/pybind11/share/cmake
+
 //Value Computed by CMake
 CMAKE_PROJECT_DESCRIPTION:STATIC=
 
@@ -205,7 +208,7 @@ OpenMP_pthread_LIBRARY:FILEPATH=/usr/lib/x86_64-linux-gnu/libpthread.a
 SIMD_ML_OPENMP:BOOL=OFF
 
 //The directory containing a CMake configuration file for pybind11.
-pybind11_DIR:PATH=pybind11_DIR-NOTFOUND
+pybind11_DIR:PATH=/home/codespace/.python/current/lib/python3.12/site-packages/pybind11/share/cmake/pybind11
 
 //Value Computed by CMake
 simd_ml_microkernels_BINARY_DIR:STATIC=/workspaces/SIMD-Microkernels-for-ML-Workloads/build
@@ -362,6 +365,8 @@ FIND_PACKAGE_MESSAGE_DETAILS_OpenMP:INTERNAL=[TRUE][cfound components: CXX ][v4.
 FIND_PACKAGE_MESSAGE_DETAILS_OpenMP_CXX:INTERNAL=[-fopenmp][/usr/lib/gcc/x86_64-linux-gnu/13/libgomp.so][/usr/lib/x86_64-linux-gnu/libpthread.a][v4.5()]
 //Details about finding Python3
 FIND_PACKAGE_MESSAGE_DETAILS_Python3:INTERNAL=[/home/codespace/.python/current/bin/python3][/home/codespace/.python/current/include/python3.12][/home/codespace/.python/current/lib/libpython3.12.a][cfound components: Interpreter Development Development.Module Development.Embed ][v3.12.1()]
+//Test HAS_FLTO_AUTO
+HAS_FLTO_AUTO:INTERNAL=1
 //Result of TRY_COMPILE
 OpenMP_COMPILE_RESULT_CXX_fopenmp:INTERNAL=TRUE
 //ADVANCED property for variable: OpenMP_CXX_FLAGS
@@ -376,8 +381,16 @@ OpenMP_SPECTEST_CXX_:INTERNAL=TRUE
 OpenMP_gomp_LIBRARY-ADVANCED:INTERNAL=1
 //ADVANCED property for variable: OpenMP_pthread_LIBRARY
 OpenMP_pthread_LIBRARY-ADVANCED:INTERNAL=1
+//Python executable during the last CMake run
+PYBIND11_PYTHON_EXECUTABLE_LAST:INTERNAL=/home/codespace/.python/current/bin/python3
+//Python debug status
+PYTHON_IS_DEBUG:INTERNAL=0
+PYTHON_MODULE_DEBUG_POSTFIX:INTERNAL=
+PYTHON_MODULE_EXTENSION:INTERNAL=.cpython-312-x86_64-linux-gnu.so
 //linker supports push/pop state
 _CMAKE_LINKER_PUSHPOP_STATE_SUPPORTED:INTERNAL=TRUE
+_PYBIND11_CROSSCOMPILING:INTERNAL=OFF
+_Python:INTERNAL=Python3
 //Compiler reason failure
 _Python3_Compiler_REASON_FAILURE:INTERNAL=
 _Python3_DEVELOPMENT_EMBED_SIGNATURE:INTERNAL=bf88df4a6b9e89476b166d1043d3a9ca
@@ -397,4 +410,6 @@ _Python3_Interpreter_REASON_FAILURE:INTERNAL=
 _Python3_LIBRARY_RELEASE:INTERNAL=/home/codespace/.python/current/lib/libpython3.12.a
 //NumPy reason failure
 _Python3_NumPy_REASON_FAILURE:INTERNAL=
+//Directories where pybind11 and possibly Python headers are located
+pybind11_INCLUDE_DIRS:INTERNAL=/home/codespace/.python/current/lib/python3.12/site-packages/pybind11/include;/home/codespace/.python/current/include/python3.12
 

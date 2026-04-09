@@ -46,6 +46,10 @@ add_library(simd_kernels_lib STATIC
     src/kernels/avx_matmul.cpp
     src/kernels/intrinsic_gelu.cpp
     src/kernels/gemm/avx2_gemm_packed.cpp
+    src/kernels/activations/relu_avx2.cpp
+    src/kernels/activations/silu_avx2.cpp
+    src/kernels/activations/softmax_avx2.cpp
+    src/kernels/gemm/gemm_dispatcher.cpp
 )
 target_include_directories(simd_kernels_lib PUBLIC src ${CMAKE_SOURCE_DIR}/src/kernels)
 set_target_properties(simd_kernels_lib PROPERTIES POSITION_INDEPENDENT_CODE ON)
