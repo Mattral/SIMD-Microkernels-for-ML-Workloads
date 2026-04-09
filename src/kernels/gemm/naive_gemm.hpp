@@ -9,6 +9,9 @@
 
 #include <cstddef>
 
+namespace simd_ml {
+namespace gemm_ref {
+
 inline void naive_sgemm(int M, int N, int K,
                         float alpha,
                         const float* A, int lda,
@@ -28,4 +31,16 @@ inline void naive_sgemm(int M, int N, int K,
             C[i * ldc + j] = alpha * sum + beta * C[i * ldc + j];
         }
     }
+}
+
+} // namespace gemm_ref
+} // namespace simd_ml
+
+inline void naive_sgemm(int M, int N, int K,
+                        float alpha,
+                        const float* A, int lda,
+                        const float* B, int ldb,
+                        float beta,
+                        float* C, int ldc) {
+    return simd_ml::gemm_ref::naive_sgemm(M, N, K, alpha, A, lda, B, ldb, beta, C, ldc);
 }

@@ -50,6 +50,7 @@
 #include <string>
 
 #include "../kernels/activations/activations.hpp"
+#include "../kernels/gemm/avx2_gemm_packed.hpp"
 #include "../kernels/intrinsic_gelu.hpp"
 #include "../kernels/cache_alloc.hpp"
 #include "../dispatch/kernel_registry.hpp"

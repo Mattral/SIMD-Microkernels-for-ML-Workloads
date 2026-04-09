@@ -217,6 +217,8 @@ Done
 **Create files:** `src/dispatch/cpuid.hpp`, `src/dispatch/kernel_registry.hpp`,
   `src/kernels/gemm/gemm_dispatcher.cpp`
 
+**Status:** runtime dispatcher implemented and Python binding integration verified.
+
 **Prompt:**
 
 ```
