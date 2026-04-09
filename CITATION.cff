@@ -1,0 +1,19 @@
+cff-version: "1.2.0"
+title: "IntrinsicML: SIMD Microkernels for ML Workloads"\nauthors:
+  - family-names: "Myet"
+    given-names: "Min Htet"
+version: "2.0.0"
+license: "MIT"
+repository-code: "https://github.com/Mattral/SIMD-Microkernels-for-ML-Workloads"
+keywords:
+  - simd
+  - avx2
+  - avx-512
+  - gemm
+  - machine-learning
+  - microkernels
+  - cpp
+preferred-citation:
+  type: software
+  title: "IntrinsicML"
+  doi: "TODO: add Zenodo DOI after publishing"

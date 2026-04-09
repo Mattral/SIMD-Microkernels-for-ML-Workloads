@@ -35,6 +35,7 @@
 #include <cassert>
 #include <ctime>
 #include <time.h>
+#include <fstream>
 #ifdef __linux__
 #  include <sched.h>
 #endif
@@ -128,10 +129,78 @@ struct BenchResult {
     double gflops;
 };
 
+struct BenchmarkRecord {
+    std::string name;
+    std::string category;
+    int M = 0;
+    int N = 0;
+    int K = 0;
+    int n = 0;
+    BenchResult result;
+};
+
+static std::string json_escape(const std::string& value) {
+    std::string escaped;
+    escaped.reserve(value.size());
+    for (char c : value) {
+        switch (c) {
+            case '\\': escaped += "\\\\"; break;
+            case '"': escaped += "\\\""; break;
+            case '\b': escaped += "\\b"; break;
+            case '\f': escaped += "\\f"; break;
+            case '\n': escaped += "\\n"; break;
+            case '\r': escaped += "\\r"; break;
+            case '\t': escaped += "\\t"; break;
+            default:
+                if (static_cast<unsigned char>(c) < 0x20) {
+                    char buf[8];
+                    snprintf(buf, sizeof(buf), "\\u%04x", c);
+                    escaped += buf;
+                } else {
+                    escaped += c;
+                }
+        }
+    }
+    return escaped;
+}
+
+static void write_json_report(const std::string& path,
+                              const std::vector<BenchmarkRecord>& records) {
+    std::ofstream file(path);
+    if (!file.is_open()) {
+        fprintf(stderr, "Failed to open JSON output file: %s\n", path.c_str());
+        return;
+    }
+
+    file << "{\n";
+    file << "  \"benchmarks\": [\n";
+    for (size_t i = 0; i < records.size(); ++i) {
+        const auto& record = records[i];
+        file << "    {\n";
+        file << "      \"name\": \"" << json_escape(record.name) << "\",\n";
+        file << "      \"category\": \"" << json_escape(record.category) << "\",\n";
+        file << "      \"M\": " << record.M << ",\n";
+        file << "      \"N\": " << record.N << ",\n";
+        file << "      \"K\": " << record.K << ",\n";
+        file << "      \"n\": " << record.n << ",\n";
+        file << "      \"min_cycles\": " << record.result.min_cycles << ",\n";
+        file << "      \"median_cycles\": " << record.result.median_cycles << ",\n";
+        file << "      \"gflops\": " << record.result.gflops << "\n";
+        file << "    }";
+        if (i + 1 < records.size()) file << ",";
+        file << "\n";
+    }
+    file << "  ]\n";
+    file << "}\n";
+    file.close();
+    printf("Wrote benchmark JSON report to %s\n", path.c_str());
+}
+
 // Run `fn` `reps` times, collect cycle counts, return statistics.
 template <typename Fn>
 static BenchResult measure(const char* name, Fn fn, long long flops,
-                            int warmup = 3, int reps = 10) {
+                            int warmup = 3, int reps = 10,
+                            BenchmarkRecord* out_record = nullptr) {
     // Warmup (page tables, branch predictor, iTLB)
     for (int i = 0; i < warmup; ++i) fn();
 
@@ -160,12 +229,18 @@ static BenchResult measure(const char* name, Fn fn, long long flops,
     printf("  %-30s | min: %10.0f cy | time: %8.3f ms | GFLOPS: %6.2f | util: %5.1f%%\n",
            name, min_cy, elapsed_sec * 1000.0, gflops, utilization);
 
-    return {min_cy, med_cy, gflops};
+    BenchResult result{min_cy, med_cy, gflops};
+    if (out_record) {
+        out_record->name = name;
+        out_record->result = result;
+    }
+    return result;
 }
 
 // ─── Benchmarks ──────────────────────────────────────────────────────────────
 
-static void bench_gemm() {
+static void bench_gemm(std::vector<BenchmarkRecord>& records,
+                         int warmup, int reps) {
     printf("\n=== GEMM Benchmarks (single-precision, C = A*B) ===\n");
     printf("  %-30s | %-22s | %-22s | %s\n",
            "Config", "min cycles", "median cycles", "GFLOPS");
@@ -192,6 +267,12 @@ static void bench_gemm() {
 
         // Only run scalar for sizes ≤ 256 (would be very slow for 1024×1024)
         if (sz <= 256) {
+            BenchmarkRecord scalar_record{};
+            scalar_record.category = "gemm";
+            scalar_record.name = label_scalar;
+            scalar_record.M = M;
+            scalar_record.N = N;
+            scalar_record.K = K;
             measure(label_scalar,
                     [&]() {
                         scalar_sgemm(M, N, K,
@@ -199,11 +280,18 @@ static void bench_gemm() {
                                      B.get(), N,
                                      C_scalar.get(), N);
                     },
-                    flops);
+                    flops, warmup, reps, &scalar_record);
+            records.push_back(std::move(scalar_record));
         } else {
             printf("  %-30s | (skipped — too slow for scalar)\n", label_scalar);
         }
 
+        BenchmarkRecord simd_record{};
+        simd_record.category = "gemm";
+        simd_record.name = label_simd;
+        simd_record.M = M;
+        simd_record.N = N;
+        simd_record.K = K;
         auto r_simd = measure(label_simd,
                               [&]() {
                                   simd_sgemm(M, N, K,
@@ -213,12 +301,14 @@ static void bench_gemm() {
                                              0.0f,
                                              C_simd.get(), N);
                               },
-                              flops);
+                              flops, warmup, reps, &simd_record);
+        records.push_back(std::move(simd_record));
         (void)r_simd;
     }
 }
 
-static void bench_gelu() {
+static void bench_gelu(std::vector<BenchmarkRecord>& records,
+                         int warmup, int reps) {
     printf("\n=== GeLU Benchmarks (element-wise, FP32) ===\n");
     printf("  %-30s | %-22s | %-22s | %s\n",
            "Config", "min cycles", "median cycles", "Gelements/s");
@@ -240,12 +330,23 @@ static void bench_gelu() {
         // Use element-count as "flops" proxy (each element ~15 FMA ops)
         long long ops = 15LL * n;
 
+        BenchmarkRecord scalar_record{};
+        scalar_record.category = "activations";
+        scalar_record.name = label_scalar;
+        scalar_record.n = n;
         measure(label_scalar,
                 [&]() { gelu_forward_scalar(input.get(), out_scalar.get(), n); },
-                ops);
+                ops, warmup, reps, &scalar_record);
+        records.push_back(std::move(scalar_record));
+
+        BenchmarkRecord simd_record{};
+        simd_record.category = "activations";
+        simd_record.name = label_simd;
+        simd_record.n = n;
         measure(label_simd,
                 [&]() { gelu_forward_avx2(input.get(), out_simd.get(), n); },
-                ops);
+                ops, warmup, reps, &simd_record);
+        records.push_back(std::move(simd_record));
 
         // Numerical accuracy check: max relative error
         double max_err = 0.0;
@@ -259,10 +360,11 @@ static void bench_gelu() {
     }
 }
 
-static void bench_alignment() {
+static void bench_alignment(std::vector<BenchmarkRecord>& records,
+                             int warmup, int reps) {
     printf("\n=== Memory Alignment Overhead Test ===\n");
     // Compare aligned vs deliberately unaligned GEMM loads (simulates
-    // the cache-line crossing penalty on misaligned data).
+    // the cache-line crossing penalty on misaligned data.
 
     int M = 256, N = 256, K = 256;
     long long flops = 2LL * M * N * K;
@@ -284,24 +386,35 @@ static void bench_alignment() {
            (void*)A_mis,
            is_aligned(A_mis) ? "YES" : "NO");
 
+    BenchmarkRecord aligned_record{};
+    aligned_record.category = "gemm_alignment";
+    aligned_record.name = "Aligned   GEMM 256x256";
+    aligned_record.M = M;
+    aligned_record.N = N;
+    aligned_record.K = K;
     measure("Aligned   GEMM 256x256",
             [&]() {
                 simd_sgemm(M, N, K, 1.0f,
                            A_aligned.get(), K, B_aligned.get(), N,
                            0.0f, C_aligned.get(), N);
             },
-            flops);
+            flops, warmup, reps, &aligned_record);
+    records.push_back(std::move(aligned_record));
 
+    BenchmarkRecord misaligned_record{};
+    misaligned_record.category = "gemm_alignment";
+    misaligned_record.name = "Misaligned GEMM 256x256";
+    misaligned_record.M = M;
+    misaligned_record.N = N;
+    misaligned_record.K = K;
     measure("Misaligned GEMM 256x256",
             [&]() {
-                // Force unaligned load path by using _mm256_loadu_ps inside a
-                // separate scalar call (the SIMD kernel itself uses loadu_ps
-                // for robustness — this illustrates allocation overhead)
                 simd_sgemm(M, N, K, 1.0f,
                            A_mis, K, B_mis, N,
                            0.0f, C_mis, N);
             },
-            flops);
+            flops, warmup, reps, &misaligned_record);
+    records.push_back(std::move(misaligned_record));
 }
 
 // ─── Performance Summary Table ────────────────────────────────────────────────
@@ -319,34 +432,35 @@ static void print_roofline_summary() {
     printf("\n  Performance Matrix:\n");
     printf("  %-16s %-22s %-22s %-10s\n",
            "Matrix Size", "Scalar -O3 (MCycles)", "SIMD AVX2 (MCycles)", "Speedup");
-    printf("  %s\n", std::string(72, '-').c_str());
+    printint argc, char** argv) {
+    std::string json_output;
+    int warmup = 3;
+    int reps = 10;
 
-    // Representative numbers from a typical run (actual numbers printed above)
-    struct Row { const char* sz; double scalar_mc; double simd_mc; };
-    Row rows[] = {
-        { "64×64×64",    2.1,   0.4  },
-        { "128×128×128", 16.5,  2.1  },
-        { "256×256×256", 130.0, 12.4 },
-        { "(512 SIMD only)", 0, 88.0 },
-    };
-    for (auto& r : rows) {
-        if (r.scalar_mc > 0) {
-            printf("  %-16s %-22.1f %-22.1f %.1fx\n",
-                   r.sz, r.scalar_mc, r.simd_mc, r.scalar_mc / r.simd_mc);
+    for (int i = 1; i < argc; ++i) {
+        if (strcmp(argv[i], "--json") == 0 && i + 1 < argc) {
+            json_output = argv[++i];
+        } else if (strcmp(argv[i], "--warmup") == 0 && i + 1 < argc) {
+            warmup = std::atoi(argv[++i]);
+        } else if (strcmp(argv[i], "--reps") == 0 && i + 1 < argc) {
+            reps = std::atoi(argv[++i]);
+        } else if (strcmp(argv[i], "--help") == 0 || strcmp(argv[i], "-h") == 0) {
+            printf("Usage: %s [--json path] [--warmup n] [--reps n]\n", argv[0]);
+            printf("  --json PATH   Write benchmark results in JSON format.\n");
+            printf("  --warmup N    Number of warmup iterations (default 3).\n");
+            printf("  --reps N      Number of measured repetitions (default 10).\n");
+            return 0;
         } else {
-            printf("  %-16s %-22s %-22.1f  —\n",
-                   r.sz, "—", r.simd_mc);
+            fprintf(stderr, "Unknown argument: %s\n", argv[i]);
+            return 1;
         }
     }
-}
 
-// ─── Entry point ──────────────────────────────────────────────────────────────
-int main() {
     printf("╔══════════════════════════════════════════════════╗\n");
     printf("║  SIMD-ML-Microkernels  ·  Cycle-Accurate Bench  ║\n");
     printf("╚══════════════════════════════════════════════════╝\n");
     printf("  Measurement: RDTSC with LFENCE/RDTSCP serialisation\n");
-    printf("  Warmup: 3 reps · Measurement: 10 reps · Metric: min(cycles)\n");
+    printf("  Warmup: %d reps · Measurement: %d reps · Metric: min(cycles)\n", warmup, reps);
 
 #ifdef __linux__
     pin_to_core(0);
@@ -358,10 +472,15 @@ int main() {
     }
     printf("  Calibrated TSC frequency: %.3f GHz\n", g_tsc_hz / 1e9);
 
-    bench_alignment();
-    bench_gemm();
-    bench_gelu();
+    std::vector<BenchmarkRecord> records;
+    bench_alignment(records, warmup, reps);
+    bench_gemm(records, warmup, reps);
+    bench_gelu(records, warmup, reps);
     print_roofline_summary();
+
+    if (!json_output.empty()) {
+        write_json_report(json_output, records);
+    }
 
     return 0;
 }
