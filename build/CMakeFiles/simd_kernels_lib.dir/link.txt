@@ -1,2 +1,2 @@
-/usr/bin/ar qc libsimd_kernels_lib.a CMakeFiles/simd_kernels_lib.dir/src/kernels/avx_matmul.cpp.o CMakeFiles/simd_kernels_lib.dir/src/kernels/intrinsic_gelu.cpp.o
+/usr/bin/ar qc libsimd_kernels_lib.a CMakeFiles/simd_kernels_lib.dir/src/kernels/avx_matmul.cpp.o CMakeFiles/simd_kernels_lib.dir/src/kernels/intrinsic_gelu.cpp.o CMakeFiles/simd_kernels_lib.dir/src/kernels/gemm/avx2_gemm_packed.cpp.o
 /usr/bin/ranlib libsimd_kernels_lib.a

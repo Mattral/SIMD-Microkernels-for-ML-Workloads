@@ -97,19 +97,35 @@ tests/CMakeFiles/simd_kernels_precision_lib.dir/__/src/kernels/intrinsic_gelu.cp
 	@$(CMAKE_COMMAND) -E cmake_echo_color "--switch=$(COLOR)" --green "Compiling CXX source to assembly CMakeFiles/simd_kernels_precision_lib.dir/__/src/kernels/intrinsic_gelu.cpp.s"
 	cd /workspaces/SIMD-Microkernels-for-ML-Workloads/build/tests && /usr/bin/c++ $(CXX_DEFINES) $(CXX_INCLUDES) $(CXX_FLAGS) -S /workspaces/SIMD-Microkernels-for-ML-Workloads/src/kernels/intrinsic_gelu.cpp -o CMakeFiles/simd_kernels_precision_lib.dir/__/src/kernels/intrinsic_gelu.cpp.s
 
+tests/CMakeFiles/simd_kernels_precision_lib.dir/__/src/kernels/gemm/avx2_gemm_packed.cpp.o: tests/CMakeFiles/simd_kernels_precision_lib.dir/flags.make
+tests/CMakeFiles/simd_kernels_precision_lib.dir/__/src/kernels/gemm/avx2_gemm_packed.cpp.o: /workspaces/SIMD-Microkernels-for-ML-Workloads/src/kernels/gemm/avx2_gemm_packed.cpp
+tests/CMakeFiles/simd_kernels_precision_lib.dir/__/src/kernels/gemm/avx2_gemm_packed.cpp.o: tests/CMakeFiles/simd_kernels_precision_lib.dir/compiler_depend.ts
+	@$(CMAKE_COMMAND) -E cmake_echo_color "--switch=$(COLOR)" --green --progress-dir=/workspaces/SIMD-Microkernels-for-ML-Workloads/build/CMakeFiles --progress-num=$(CMAKE_PROGRESS_3) "Building CXX object tests/CMakeFiles/simd_kernels_precision_lib.dir/__/src/kernels/gemm/avx2_gemm_packed.cpp.o"
+	cd /workspaces/SIMD-Microkernels-for-ML-Workloads/build/tests && /usr/bin/c++ $(CXX_DEFINES) $(CXX_INCLUDES) $(CXX_FLAGS) -MD -MT tests/CMakeFiles/simd_kernels_precision_lib.dir/__/src/kernels/gemm/avx2_gemm_packed.cpp.o -MF CMakeFiles/simd_kernels_precision_lib.dir/__/src/kernels/gemm/avx2_gemm_packed.cpp.o.d -o CMakeFiles/simd_kernels_precision_lib.dir/__/src/kernels/gemm/avx2_gemm_packed.cpp.o -c /workspaces/SIMD-Microkernels-for-ML-Workloads/src/kernels/gemm/avx2_gemm_packed.cpp
+
+tests/CMakeFiles/simd_kernels_precision_lib.dir/__/src/kernels/gemm/avx2_gemm_packed.cpp.i: cmake_force
+	@$(CMAKE_COMMAND) -E cmake_echo_color "--switch=$(COLOR)" --green "Preprocessing CXX source to CMakeFiles/simd_kernels_precision_lib.dir/__/src/kernels/gemm/avx2_gemm_packed.cpp.i"
+	cd /workspaces/SIMD-Microkernels-for-ML-Workloads/build/tests && /usr/bin/c++ $(CXX_DEFINES) $(CXX_INCLUDES) $(CXX_FLAGS) -E /workspaces/SIMD-Microkernels-for-ML-Workloads/src/kernels/gemm/avx2_gemm_packed.cpp > CMakeFiles/simd_kernels_precision_lib.dir/__/src/kernels/gemm/avx2_gemm_packed.cpp.i
+
+tests/CMakeFiles/simd_kernels_precision_lib.dir/__/src/kernels/gemm/avx2_gemm_packed.cpp.s: cmake_force
+	@$(CMAKE_COMMAND) -E cmake_echo_color "--switch=$(COLOR)" --green "Compiling CXX source to assembly CMakeFiles/simd_kernels_precision_lib.dir/__/src/kernels/gemm/avx2_gemm_packed.cpp.s"
+	cd /workspaces/SIMD-Microkernels-for-ML-Workloads/build/tests && /usr/bin/c++ $(CXX_DEFINES) $(CXX_INCLUDES) $(CXX_FLAGS) -S /workspaces/SIMD-Microkernels-for-ML-Workloads/src/kernels/gemm/avx2_gemm_packed.cpp -o CMakeFiles/simd_kernels_precision_lib.dir/__/src/kernels/gemm/avx2_gemm_packed.cpp.s
+
 # Object files for target simd_kernels_precision_lib
 simd_kernels_precision_lib_OBJECTS = \
 "CMakeFiles/simd_kernels_precision_lib.dir/__/src/kernels/avx_matmul.cpp.o" \
-"CMakeFiles/simd_kernels_precision_lib.dir/__/src/kernels/intrinsic_gelu.cpp.o"
+"CMakeFiles/simd_kernels_precision_lib.dir/__/src/kernels/intrinsic_gelu.cpp.o" \
+"CMakeFiles/simd_kernels_precision_lib.dir/__/src/kernels/gemm/avx2_gemm_packed.cpp.o"
 
 # External object files for target simd_kernels_precision_lib
 simd_kernels_precision_lib_EXTERNAL_OBJECTS =
 
 tests/libsimd_kernels_precision_lib.a: tests/CMakeFiles/simd_kernels_precision_lib.dir/__/src/kernels/avx_matmul.cpp.o
 tests/libsimd_kernels_precision_lib.a: tests/CMakeFiles/simd_kernels_precision_lib.dir/__/src/kernels/intrinsic_gelu.cpp.o
+tests/libsimd_kernels_precision_lib.a: tests/CMakeFiles/simd_kernels_precision_lib.dir/__/src/kernels/gemm/avx2_gemm_packed.cpp.o
 tests/libsimd_kernels_precision_lib.a: tests/CMakeFiles/simd_kernels_precision_lib.dir/build.make
 tests/libsimd_kernels_precision_lib.a: tests/CMakeFiles/simd_kernels_precision_lib.dir/link.txt
-	@$(CMAKE_COMMAND) -E cmake_echo_color "--switch=$(COLOR)" --green --bold --progress-dir=/workspaces/SIMD-Microkernels-for-ML-Workloads/build/CMakeFiles --progress-num=$(CMAKE_PROGRESS_3) "Linking CXX static library libsimd_kernels_precision_lib.a"
+	@$(CMAKE_COMMAND) -E cmake_echo_color "--switch=$(COLOR)" --green --bold --progress-dir=/workspaces/SIMD-Microkernels-for-ML-Workloads/build/CMakeFiles --progress-num=$(CMAKE_PROGRESS_4) "Linking CXX static library libsimd_kernels_precision_lib.a"
 	cd /workspaces/SIMD-Microkernels-for-ML-Workloads/build/tests && $(CMAKE_COMMAND) -P CMakeFiles/simd_kernels_precision_lib.dir/cmake_clean_target.cmake
 	cd /workspaces/SIMD-Microkernels-for-ML-Workloads/build/tests && $(CMAKE_COMMAND) -E cmake_link_script CMakeFiles/simd_kernels_precision_lib.dir/link.txt --verbose=$(VERBOSE)
 

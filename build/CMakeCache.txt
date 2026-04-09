@@ -201,6 +201,9 @@ OpenMP_gomp_LIBRARY:FILEPATH=/usr/lib/gcc/x86_64-linux-gnu/13/libgomp.so
 //Path to the pthread library for OpenMP
 OpenMP_pthread_LIBRARY:FILEPATH=/usr/lib/x86_64-linux-gnu/libpthread.a
 
+//Enable OpenMP multithreading in GEMM
+SIMD_ML_OPENMP:BOOL=OFF
+
 //The directory containing a CMake configuration file for pybind11.
 pybind11_DIR:PATH=pybind11_DIR-NOTFOUND
 
@@ -354,7 +357,7 @@ COMPILER_HAS_AVX512F:INTERNAL=1
 //Test COMPILER_HAS_FMA
 COMPILER_HAS_FMA:INTERNAL=1
 //Details about finding OpenMP
-FIND_PACKAGE_MESSAGE_DETAILS_OpenMP:INTERNAL=[TRUE][c ][v4.5()]
+FIND_PACKAGE_MESSAGE_DETAILS_OpenMP:INTERNAL=[TRUE][cfound components: CXX ][v4.5()]
 //Details about finding OpenMP_CXX
 FIND_PACKAGE_MESSAGE_DETAILS_OpenMP_CXX:INTERNAL=[-fopenmp][/usr/lib/gcc/x86_64-linux-gnu/13/libgomp.so][/usr/lib/x86_64-linux-gnu/libpthread.a][v4.5()]
 //Details about finding Python3

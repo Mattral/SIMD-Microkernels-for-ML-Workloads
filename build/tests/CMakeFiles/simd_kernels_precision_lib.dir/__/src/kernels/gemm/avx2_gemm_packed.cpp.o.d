@@ -1,7 +1,7 @@
-CMakeFiles/simd_kernels_lib.dir/src/kernels/avx_matmul.cpp.o: \
- /workspaces/SIMD-Microkernels-for-ML-Workloads/src/kernels/avx_matmul.cpp \
+tests/CMakeFiles/simd_kernels_precision_lib.dir/__/src/kernels/gemm/avx2_gemm_packed.cpp.o: \
+ /workspaces/SIMD-Microkernels-for-ML-Workloads/src/kernels/gemm/avx2_gemm_packed.cpp \
  /usr/include/stdc-predef.h \
- /workspaces/SIMD-Microkernels-for-ML-Workloads/src/kernels/cache_alloc.hpp \
+ /workspaces/SIMD-Microkernels-for-ML-Workloads/src/kernels/gemm/avx2_gemm_packed.hpp \
  /usr/include/c++/13/cstddef \
  /usr/include/x86_64-linux-gnu/c++/13/bits/c++config.h \
  /usr/include/x86_64-linux-gnu/c++/13/bits/os_defines.h \
@@ -15,6 +15,7 @@ CMakeFiles/simd_kernels_lib.dir/src/kernels/avx_matmul.cpp.o: \
  /usr/include/x86_64-linux-gnu/c++/13/bits/cpu_defines.h \
  /usr/include/c++/13/pstl/pstl_config.h \
  /usr/lib/gcc/x86_64-linux-gnu/13/include/stddef.h \
+ /workspaces/SIMD-Microkernels-for-ML-Workloads/src/kernels/cache_alloc.hpp \
  /usr/include/c++/13/cstdlib /usr/include/stdlib.h \
  /usr/include/x86_64-linux-gnu/bits/libc-header-start.h \
  /usr/include/x86_64-linux-gnu/bits/waitflags.h \
@@ -166,12 +167,12 @@ CMakeFiles/simd_kernels_lib.dir/src/kernels/avx_matmul.cpp.o: \
  /usr/include/c++/13/bits/basic_string.tcc \
  /usr/include/c++/13/bits/memory_resource.h \
  /usr/include/c++/13/bits/uses_allocator_args.h \
- /workspaces/SIMD-Microkernels-for-ML-Workloads/src/kernels/avx_matmul.hpp \
  /usr/include/c++/13/algorithm /usr/include/c++/13/bits/stl_algo.h \
  /usr/include/c++/13/bits/algorithmfwd.h \
  /usr/include/c++/13/bits/stl_heap.h \
  /usr/include/c++/13/bits/uniform_int_dist.h \
  /usr/include/c++/13/pstl/glue_algorithm_defs.h \
+ /usr/include/c++/13/cassert /usr/include/assert.h \
  /usr/lib/gcc/x86_64-linux-gnu/13/include/immintrin.h \
  /usr/lib/gcc/x86_64-linux-gnu/13/include/x86gprintrin.h \
  /usr/lib/gcc/x86_64-linux-gnu/13/include/ia32intrin.h \

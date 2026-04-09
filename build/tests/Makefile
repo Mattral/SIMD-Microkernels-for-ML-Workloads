@@ -178,6 +178,30 @@ __/src/kernels/avx_matmul.cpp.s:
 	cd /workspaces/SIMD-Microkernels-for-ML-Workloads/build && $(MAKE) $(MAKESILENT) -f tests/CMakeFiles/simd_kernels_precision_lib.dir/build.make tests/CMakeFiles/simd_kernels_precision_lib.dir/__/src/kernels/avx_matmul.cpp.s
 .PHONY : __/src/kernels/avx_matmul.cpp.s
 
+__/src/kernels/gemm/avx2_gemm_packed.o: __/src/kernels/gemm/avx2_gemm_packed.cpp.o
+.PHONY : __/src/kernels/gemm/avx2_gemm_packed.o
+
+# target to build an object file
+__/src/kernels/gemm/avx2_gemm_packed.cpp.o:
+	cd /workspaces/SIMD-Microkernels-for-ML-Workloads/build && $(MAKE) $(MAKESILENT) -f tests/CMakeFiles/simd_kernels_precision_lib.dir/build.make tests/CMakeFiles/simd_kernels_precision_lib.dir/__/src/kernels/gemm/avx2_gemm_packed.cpp.o
+.PHONY : __/src/kernels/gemm/avx2_gemm_packed.cpp.o
+
+__/src/kernels/gemm/avx2_gemm_packed.i: __/src/kernels/gemm/avx2_gemm_packed.cpp.i
+.PHONY : __/src/kernels/gemm/avx2_gemm_packed.i
+
+# target to preprocess a source file
+__/src/kernels/gemm/avx2_gemm_packed.cpp.i:
+	cd /workspaces/SIMD-Microkernels-for-ML-Workloads/build && $(MAKE) $(MAKESILENT) -f tests/CMakeFiles/simd_kernels_precision_lib.dir/build.make tests/CMakeFiles/simd_kernels_precision_lib.dir/__/src/kernels/gemm/avx2_gemm_packed.cpp.i
+.PHONY : __/src/kernels/gemm/avx2_gemm_packed.cpp.i
+
+__/src/kernels/gemm/avx2_gemm_packed.s: __/src/kernels/gemm/avx2_gemm_packed.cpp.s
+.PHONY : __/src/kernels/gemm/avx2_gemm_packed.s
+
+# target to generate assembly for a file
+__/src/kernels/gemm/avx2_gemm_packed.cpp.s:
+	cd /workspaces/SIMD-Microkernels-for-ML-Workloads/build && $(MAKE) $(MAKESILENT) -f tests/CMakeFiles/simd_kernels_precision_lib.dir/build.make tests/CMakeFiles/simd_kernels_precision_lib.dir/__/src/kernels/gemm/avx2_gemm_packed.cpp.s
+.PHONY : __/src/kernels/gemm/avx2_gemm_packed.cpp.s
+
 __/src/kernels/intrinsic_gelu.o: __/src/kernels/intrinsic_gelu.cpp.o
 .PHONY : __/src/kernels/intrinsic_gelu.o
 
@@ -274,6 +298,30 @@ test_gemm.cpp.s:
 	cd /workspaces/SIMD-Microkernels-for-ML-Workloads/build && $(MAKE) $(MAKESILENT) -f tests/CMakeFiles/simd_tests.dir/build.make tests/CMakeFiles/simd_tests.dir/test_gemm.cpp.s
 .PHONY : test_gemm.cpp.s
 
+test_gemm_packed.o: test_gemm_packed.cpp.o
+.PHONY : test_gemm_packed.o
+
+# target to build an object file
+test_gemm_packed.cpp.o:
+	cd /workspaces/SIMD-Microkernels-for-ML-Workloads/build && $(MAKE) $(MAKESILENT) -f tests/CMakeFiles/simd_tests.dir/build.make tests/CMakeFiles/simd_tests.dir/test_gemm_packed.cpp.o
+.PHONY : test_gemm_packed.cpp.o
+
+test_gemm_packed.i: test_gemm_packed.cpp.i
+.PHONY : test_gemm_packed.i
+
+# target to preprocess a source file
+test_gemm_packed.cpp.i:
+	cd /workspaces/SIMD-Microkernels-for-ML-Workloads/build && $(MAKE) $(MAKESILENT) -f tests/CMakeFiles/simd_tests.dir/build.make tests/CMakeFiles/simd_tests.dir/test_gemm_packed.cpp.i
+.PHONY : test_gemm_packed.cpp.i
+
+test_gemm_packed.s: test_gemm_packed.cpp.s
+.PHONY : test_gemm_packed.s
+
+# target to generate assembly for a file
+test_gemm_packed.cpp.s:
+	cd /workspaces/SIMD-Microkernels-for-ML-Workloads/build && $(MAKE) $(MAKESILENT) -f tests/CMakeFiles/simd_tests.dir/build.make tests/CMakeFiles/simd_tests.dir/test_gemm_packed.cpp.s
+.PHONY : test_gemm_packed.cpp.s
+
 # Help Target
 help:
 	@echo "The following are some of the valid targets for this Makefile:"
@@ -288,6 +336,9 @@ help:
 	@echo "... __/src/kernels/avx_matmul.o"
 	@echo "... __/src/kernels/avx_matmul.i"
 	@echo "... __/src/kernels/avx_matmul.s"
+	@echo "... __/src/kernels/gemm/avx2_gemm_packed.o"
+	@echo "... __/src/kernels/gemm/avx2_gemm_packed.i"
+	@echo "... __/src/kernels/gemm/avx2_gemm_packed.s"
 	@echo "... __/src/kernels/intrinsic_gelu.o"
 	@echo "... __/src/kernels/intrinsic_gelu.i"
 	@echo "... __/src/kernels/intrinsic_gelu.s"
@@ -300,6 +351,9 @@ help:
 	@echo "... test_gemm.o"
 	@echo "... test_gemm.i"
 	@echo "... test_gemm.s"
+	@echo "... test_gemm_packed.o"
+	@echo "... test_gemm_packed.i"
+	@echo "... test_gemm_packed.s"
 .PHONY : help
 
 

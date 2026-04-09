@@ -202,6 +202,30 @@ src/kernels/avx_matmul.cpp.s:
 	$(MAKE) $(MAKESILENT) -f CMakeFiles/simd_kernels_lib.dir/build.make CMakeFiles/simd_kernels_lib.dir/src/kernels/avx_matmul.cpp.s
 .PHONY : src/kernels/avx_matmul.cpp.s
 
+src/kernels/gemm/avx2_gemm_packed.o: src/kernels/gemm/avx2_gemm_packed.cpp.o
+.PHONY : src/kernels/gemm/avx2_gemm_packed.o
+
+# target to build an object file
+src/kernels/gemm/avx2_gemm_packed.cpp.o:
+	$(MAKE) $(MAKESILENT) -f CMakeFiles/simd_kernels_lib.dir/build.make CMakeFiles/simd_kernels_lib.dir/src/kernels/gemm/avx2_gemm_packed.cpp.o
+.PHONY : src/kernels/gemm/avx2_gemm_packed.cpp.o
+
+src/kernels/gemm/avx2_gemm_packed.i: src/kernels/gemm/avx2_gemm_packed.cpp.i
+.PHONY : src/kernels/gemm/avx2_gemm_packed.i
+
+# target to preprocess a source file
+src/kernels/gemm/avx2_gemm_packed.cpp.i:
+	$(MAKE) $(MAKESILENT) -f CMakeFiles/simd_kernels_lib.dir/build.make CMakeFiles/simd_kernels_lib.dir/src/kernels/gemm/avx2_gemm_packed.cpp.i
+.PHONY : src/kernels/gemm/avx2_gemm_packed.cpp.i
+
+src/kernels/gemm/avx2_gemm_packed.s: src/kernels/gemm/avx2_gemm_packed.cpp.s
+.PHONY : src/kernels/gemm/avx2_gemm_packed.s
+
+# target to generate assembly for a file
+src/kernels/gemm/avx2_gemm_packed.cpp.s:
+	$(MAKE) $(MAKESILENT) -f CMakeFiles/simd_kernels_lib.dir/build.make CMakeFiles/simd_kernels_lib.dir/src/kernels/gemm/avx2_gemm_packed.cpp.s
+.PHONY : src/kernels/gemm/avx2_gemm_packed.cpp.s
+
 src/kernels/intrinsic_gelu.o: src/kernels/intrinsic_gelu.cpp.o
 .PHONY : src/kernels/intrinsic_gelu.o
 
@@ -266,6 +290,9 @@ help:
 	@echo "... src/kernels/avx_matmul.o"
 	@echo "... src/kernels/avx_matmul.i"
 	@echo "... src/kernels/avx_matmul.s"
+	@echo "... src/kernels/gemm/avx2_gemm_packed.o"
+	@echo "... src/kernels/gemm/avx2_gemm_packed.i"
+	@echo "... src/kernels/gemm/avx2_gemm_packed.s"
 	@echo "... src/kernels/intrinsic_gelu.o"
 	@echo "... src/kernels/intrinsic_gelu.i"
 	@echo "... src/kernels/intrinsic_gelu.s"
