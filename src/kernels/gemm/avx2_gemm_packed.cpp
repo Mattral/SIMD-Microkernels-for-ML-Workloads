@@ -17,6 +17,10 @@
 #include <cassert>
 #include <cstdint>
 #include <cstring>
+#include <atomic>
+#ifdef SIMD_ML_OPENMP
+#include <omp.h>
+#endif
 
 #ifdef __AVX2__
 #  include <immintrin.h>
@@ -80,16 +84,19 @@ static void gemm_scalar_block(int mr, int nr, int kc,
                               float* C,
                               int ldc,
                               float alpha) {
+    // Perform updates in p-major order so the floating-point addition
+    // sequence matches the reference naive implementation (summing over
+    // K in increasing order). This reduces differences caused by
+    // different associativity across KC panels.
     for (int i = 0; i < mr; ++i) {
-        const float* a_row = A_packed + i * kc;
         float* c_row = C + i * ldc;
-        for (int j = 0; j < nr; ++j) {
-            const float* b_col = B_packed + j;
-            double acc = 0.0;
-            for (int p = 0; p < kc; ++p) {
-                acc += static_cast<double>(a_row[p]) * static_cast<double>(b_col[p * NR]);
+        const float* a_row = A_packed + i * kc;
+        for (int p = 0; p < kc; ++p) {
+            float a_val = a_row[p];
+            const float* b_col = B_packed + p * NR;
+            for (int j = 0; j < nr; ++j) {
+                c_row[j] += alpha * (a_val * b_col[j]);
             }
-            c_row[j] += alpha * static_cast<float>(acc);
         }
     }
 }
@@ -103,16 +110,17 @@ static void gemm_scalar_block_accumulate(int mr, int nr, int kc,
                                          double* C_acc,
                                          int ldc_acc,
                                          double alpha) {
+    // Accumulate in p-major order to preserve the same addition sequence
+    // across KC panels (but in double precision to reduce rounding).
     for (int i = 0; i < mr; ++i) {
-        const float* a_row = A_packed + i * kc;
         double* c_row = C_acc + i * ldc_acc;
-        for (int j = 0; j < nr; ++j) {
-            const float* b_col = B_packed + j;
-            double acc = 0.0;
-            for (int p = 0; p < kc; ++p) {
-                acc += static_cast<double>(a_row[p]) * static_cast<double>(b_col[p * NR]);
+        const float* a_row = A_packed + i * kc;
+        for (int p = 0; p < kc; ++p) {
+            double a_val = static_cast<double>(a_row[p]);
+            const float* b_col = B_packed + p * NR;
+            for (int j = 0; j < nr; ++j) {
+                c_row[j] += alpha * a_val * static_cast<double>(b_col[j]);
             }
-            c_row[j] += alpha * acc;
         }
     }
 }
@@ -269,15 +277,75 @@ void sgemm_packed(int M, int N, int K,
 
     scale_matrix_c(C, M, N, ldc, beta);
 
-    auto B_packed = make_aligned_array<float>(static_cast<std::size_t>(KC) *
-                                              static_cast<std::size_t>((NC + NR - 1) / NR) * NR);
-    auto A_packed = make_aligned_array<float>(static_cast<std::size_t>(MC) *
-                                              static_cast<std::size_t>(KC));
+    // If OpenMP is enabled, use thread-local packing buffers so each worker
+    // thread writes to private scratch space and avoids false sharing.
+#ifdef SIMD_ML_OPENMP
+    struct ThreadBuffers {
+        ThreadBuffers()
+            : B_packed(make_aligned_array<float>(static_cast<std::size_t>(KC) *
+                                                  static_cast<std::size_t>((NC + NR - 1) / NR) * NR)),
+              A_packed(make_aligned_array<float>(static_cast<std::size_t>(MC) *
+                                                  static_cast<std::size_t>(KC))) {}
 
+        AlignedUniquePtr<float> B_packed;
+        AlignedUniquePtr<float> A_packed;
+    };
+
+    thread_local ThreadBuffers buffers;
+    float* B_packed_base = buffers.B_packed.get();
+    float* A_packed_base = buffers.A_packed.get();
+
+#pragma omp parallel for schedule(dynamic, 1) num_threads(get_num_threads()) if (get_num_threads() > 1)
+    for (int jc = 0; jc < N; jc += NC) {
+        int nc = std::min(N - jc, NC);
+        float* B_packed = B_packed_base;
+        float* A_packed = A_packed_base;
+
+        for (int pc = 0; pc < K; pc += KC) {
+            int kc = std::min(K - pc, KC);
+            pack_b_panel(B + static_cast<std::size_t>(pc) * ldb + jc,
+                         ldb,
+                         kc,
+                         nc,
+                         B_packed);
+
+            for (int ic = 0; ic < M; ic += MC) {
+                int mc = std::min(M - ic, MC);
+                pack_a_panel(A + static_cast<std::size_t>(ic) * lda + pc,
+                             lda,
+                             mc,
+                             kc,
+                             A_packed);
+
+                for (int jr = 0; jr < nc; jr += NR) {
+                    int nr = std::min(nc - jr, NR);
+                    const float* B_block = B_packed +
+                                            static_cast<std::size_t>(jr / NR) * kc * NR;
+
+                    for (int ir = 0; ir < mc; ir += MR) {
+                        int mr = std::min(mc - ir, MR);
+                        const float* A_block = A_packed + static_cast<std::size_t>(ir) * kc;
+                        float* C_block = C + static_cast<std::size_t>(ic + ir) * ldc + jc + jr;
+
+                        if (mr == MR && nr == NR) {
+                            inner_kernel_8x8(A_block, B_block, C_block, ldc, kc, alpha);
+                        } else {
+                            gemm_scalar_block(mr, nr, kc, A_block, B_block, C_block, ldc, alpha);
+                        }
+                    }
+                }
+            }
+        }
+    }
+#else
     for (int jc = 0; jc < N; jc += NC) {
         int nc = std::min(N - jc, NC);
         for (int pc = 0; pc < K; pc += KC) {
             int kc = std::min(K - pc, KC);
+            auto B_packed = make_aligned_array<float>(static_cast<std::size_t>(KC) *
+                                                      static_cast<std::size_t>((NC + NR - 1) / NR) * NR);
+            auto A_packed = make_aligned_array<float>(static_cast<std::size_t>(MC) *
+                                                      static_cast<std::size_t>(KC));
             pack_b_panel(B + static_cast<std::size_t>(pc) * ldb + jc,
                          ldb,
                          kc,
@@ -312,6 +380,28 @@ void sgemm_packed(int M, int N, int K,
             }
         }
     }
+#endif
+}
+
+// Thread control implementation
+static std::atomic_int g_num_threads{1};
+
+void set_num_threads(int n) {
+    if (n <= 0) n = 1;
+    g_num_threads.store(n);
+#ifdef SIMD_ML_OPENMP
+    omp_set_num_threads(n);
+#endif
+}
+
+int get_num_threads() {
+#ifdef SIMD_ML_OPENMP
+    int t = g_num_threads.load();
+    if (t <= 0) return omp_get_max_threads();
+    return t;
+#else
+    return 1;
+#endif
 }
 
 }  // namespace gemm

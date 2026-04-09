@@ -29,5 +29,11 @@ void sgemm_packed(int M, int N, int K,
                   float beta,
                   float* C, int ldc);
 
+// OpenMP thread control (optional). When OpenMP is enabled at build time
+// (`SIMD_ML_OPENMP`) these functions control the number of threads used by
+// `sgemm_packed`'s outermost parallel loop.
+void set_num_threads(int n);
+int get_num_threads();
+
 }  // namespace gemm
 }  // namespace simd_ml

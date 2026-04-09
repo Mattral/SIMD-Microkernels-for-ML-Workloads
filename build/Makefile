@@ -140,6 +140,19 @@ simd_kernels_lib/fast:
 .PHONY : simd_kernels_lib/fast
 
 #=============================================================================
+# Target rules for targets named simd_kernels
+
+# Build rule for target.
+simd_kernels: cmake_check_build_system
+	$(MAKE) $(MAKESILENT) -f CMakeFiles/Makefile2 simd_kernels
+.PHONY : simd_kernels
+
+# fast build rule for target.
+simd_kernels/fast:
+	$(MAKE) $(MAKESILENT) -f CMakeFiles/simd_kernels.dir/build.make CMakeFiles/simd_kernels.dir/build
+.PHONY : simd_kernels/fast
+
+#=============================================================================
 # Target rules for targets named bench
 
 # Build rule for target.
@@ -177,6 +190,102 @@ simd_tests: cmake_check_build_system
 simd_tests/fast:
 	$(MAKE) $(MAKESILENT) -f tests/CMakeFiles/simd_tests.dir/build.make tests/CMakeFiles/simd_tests.dir/build
 .PHONY : simd_tests/fast
+
+src/bindings/pybind_entry.o: src/bindings/pybind_entry.cpp.o
+.PHONY : src/bindings/pybind_entry.o
+
+# target to build an object file
+src/bindings/pybind_entry.cpp.o:
+	$(MAKE) $(MAKESILENT) -f CMakeFiles/simd_kernels.dir/build.make CMakeFiles/simd_kernels.dir/src/bindings/pybind_entry.cpp.o
+.PHONY : src/bindings/pybind_entry.cpp.o
+
+src/bindings/pybind_entry.i: src/bindings/pybind_entry.cpp.i
+.PHONY : src/bindings/pybind_entry.i
+
+# target to preprocess a source file
+src/bindings/pybind_entry.cpp.i:
+	$(MAKE) $(MAKESILENT) -f CMakeFiles/simd_kernels.dir/build.make CMakeFiles/simd_kernels.dir/src/bindings/pybind_entry.cpp.i
+.PHONY : src/bindings/pybind_entry.cpp.i
+
+src/bindings/pybind_entry.s: src/bindings/pybind_entry.cpp.s
+.PHONY : src/bindings/pybind_entry.s
+
+# target to generate assembly for a file
+src/bindings/pybind_entry.cpp.s:
+	$(MAKE) $(MAKESILENT) -f CMakeFiles/simd_kernels.dir/build.make CMakeFiles/simd_kernels.dir/src/bindings/pybind_entry.cpp.s
+.PHONY : src/bindings/pybind_entry.cpp.s
+
+src/kernels/activations/relu_avx2.o: src/kernels/activations/relu_avx2.cpp.o
+.PHONY : src/kernels/activations/relu_avx2.o
+
+# target to build an object file
+src/kernels/activations/relu_avx2.cpp.o:
+	$(MAKE) $(MAKESILENT) -f CMakeFiles/simd_kernels_lib.dir/build.make CMakeFiles/simd_kernels_lib.dir/src/kernels/activations/relu_avx2.cpp.o
+.PHONY : src/kernels/activations/relu_avx2.cpp.o
+
+src/kernels/activations/relu_avx2.i: src/kernels/activations/relu_avx2.cpp.i
+.PHONY : src/kernels/activations/relu_avx2.i
+
+# target to preprocess a source file
+src/kernels/activations/relu_avx2.cpp.i:
+	$(MAKE) $(MAKESILENT) -f CMakeFiles/simd_kernels_lib.dir/build.make CMakeFiles/simd_kernels_lib.dir/src/kernels/activations/relu_avx2.cpp.i
+.PHONY : src/kernels/activations/relu_avx2.cpp.i
+
+src/kernels/activations/relu_avx2.s: src/kernels/activations/relu_avx2.cpp.s
+.PHONY : src/kernels/activations/relu_avx2.s
+
+# target to generate assembly for a file
+src/kernels/activations/relu_avx2.cpp.s:
+	$(MAKE) $(MAKESILENT) -f CMakeFiles/simd_kernels_lib.dir/build.make CMakeFiles/simd_kernels_lib.dir/src/kernels/activations/relu_avx2.cpp.s
+.PHONY : src/kernels/activations/relu_avx2.cpp.s
+
+src/kernels/activations/silu_avx2.o: src/kernels/activations/silu_avx2.cpp.o
+.PHONY : src/kernels/activations/silu_avx2.o
+
+# target to build an object file
+src/kernels/activations/silu_avx2.cpp.o:
+	$(MAKE) $(MAKESILENT) -f CMakeFiles/simd_kernels_lib.dir/build.make CMakeFiles/simd_kernels_lib.dir/src/kernels/activations/silu_avx2.cpp.o
+.PHONY : src/kernels/activations/silu_avx2.cpp.o
+
+src/kernels/activations/silu_avx2.i: src/kernels/activations/silu_avx2.cpp.i
+.PHONY : src/kernels/activations/silu_avx2.i
+
+# target to preprocess a source file
+src/kernels/activations/silu_avx2.cpp.i:
+	$(MAKE) $(MAKESILENT) -f CMakeFiles/simd_kernels_lib.dir/build.make CMakeFiles/simd_kernels_lib.dir/src/kernels/activations/silu_avx2.cpp.i
+.PHONY : src/kernels/activations/silu_avx2.cpp.i
+
+src/kernels/activations/silu_avx2.s: src/kernels/activations/silu_avx2.cpp.s
+.PHONY : src/kernels/activations/silu_avx2.s
+
+# target to generate assembly for a file
+src/kernels/activations/silu_avx2.cpp.s:
+	$(MAKE) $(MAKESILENT) -f CMakeFiles/simd_kernels_lib.dir/build.make CMakeFiles/simd_kernels_lib.dir/src/kernels/activations/silu_avx2.cpp.s
+.PHONY : src/kernels/activations/silu_avx2.cpp.s
+
+src/kernels/activations/softmax_avx2.o: src/kernels/activations/softmax_avx2.cpp.o
+.PHONY : src/kernels/activations/softmax_avx2.o
+
+# target to build an object file
+src/kernels/activations/softmax_avx2.cpp.o:
+	$(MAKE) $(MAKESILENT) -f CMakeFiles/simd_kernels_lib.dir/build.make CMakeFiles/simd_kernels_lib.dir/src/kernels/activations/softmax_avx2.cpp.o
+.PHONY : src/kernels/activations/softmax_avx2.cpp.o
+
+src/kernels/activations/softmax_avx2.i: src/kernels/activations/softmax_avx2.cpp.i
+.PHONY : src/kernels/activations/softmax_avx2.i
+
+# target to preprocess a source file
+src/kernels/activations/softmax_avx2.cpp.i:
+	$(MAKE) $(MAKESILENT) -f CMakeFiles/simd_kernels_lib.dir/build.make CMakeFiles/simd_kernels_lib.dir/src/kernels/activations/softmax_avx2.cpp.i
+.PHONY : src/kernels/activations/softmax_avx2.cpp.i
+
+src/kernels/activations/softmax_avx2.s: src/kernels/activations/softmax_avx2.cpp.s
+.PHONY : src/kernels/activations/softmax_avx2.s
+
+# target to generate assembly for a file
+src/kernels/activations/softmax_avx2.cpp.s:
+	$(MAKE) $(MAKESILENT) -f CMakeFiles/simd_kernels_lib.dir/build.make CMakeFiles/simd_kernels_lib.dir/src/kernels/activations/softmax_avx2.cpp.s
+.PHONY : src/kernels/activations/softmax_avx2.cpp.s
 
 src/kernels/avx_matmul.o: src/kernels/avx_matmul.cpp.o
 .PHONY : src/kernels/avx_matmul.o
@@ -225,6 +334,30 @@ src/kernels/gemm/avx2_gemm_packed.s: src/kernels/gemm/avx2_gemm_packed.cpp.s
 src/kernels/gemm/avx2_gemm_packed.cpp.s:
 	$(MAKE) $(MAKESILENT) -f CMakeFiles/simd_kernels_lib.dir/build.make CMakeFiles/simd_kernels_lib.dir/src/kernels/gemm/avx2_gemm_packed.cpp.s
 .PHONY : src/kernels/gemm/avx2_gemm_packed.cpp.s
+
+src/kernels/gemm/gemm_dispatcher.o: src/kernels/gemm/gemm_dispatcher.cpp.o
+.PHONY : src/kernels/gemm/gemm_dispatcher.o
+
+# target to build an object file
+src/kernels/gemm/gemm_dispatcher.cpp.o:
+	$(MAKE) $(MAKESILENT) -f CMakeFiles/simd_kernels_lib.dir/build.make CMakeFiles/simd_kernels_lib.dir/src/kernels/gemm/gemm_dispatcher.cpp.o
+.PHONY : src/kernels/gemm/gemm_dispatcher.cpp.o
+
+src/kernels/gemm/gemm_dispatcher.i: src/kernels/gemm/gemm_dispatcher.cpp.i
+.PHONY : src/kernels/gemm/gemm_dispatcher.i
+
+# target to preprocess a source file
+src/kernels/gemm/gemm_dispatcher.cpp.i:
+	$(MAKE) $(MAKESILENT) -f CMakeFiles/simd_kernels_lib.dir/build.make CMakeFiles/simd_kernels_lib.dir/src/kernels/gemm/gemm_dispatcher.cpp.i
+.PHONY : src/kernels/gemm/gemm_dispatcher.cpp.i
+
+src/kernels/gemm/gemm_dispatcher.s: src/kernels/gemm/gemm_dispatcher.cpp.s
+.PHONY : src/kernels/gemm/gemm_dispatcher.s
+
+# target to generate assembly for a file
+src/kernels/gemm/gemm_dispatcher.cpp.s:
+	$(MAKE) $(MAKESILENT) -f CMakeFiles/simd_kernels_lib.dir/build.make CMakeFiles/simd_kernels_lib.dir/src/kernels/gemm/gemm_dispatcher.cpp.s
+.PHONY : src/kernels/gemm/gemm_dispatcher.cpp.s
 
 src/kernels/intrinsic_gelu.o: src/kernels/intrinsic_gelu.cpp.o
 .PHONY : src/kernels/intrinsic_gelu.o
@@ -284,15 +417,31 @@ help:
 	@echo "... rebuild_cache"
 	@echo "... test"
 	@echo "... bench"
+	@echo "... simd_kernels"
 	@echo "... simd_kernels_lib"
 	@echo "... simd_kernels_precision_lib"
 	@echo "... simd_tests"
+	@echo "... src/bindings/pybind_entry.o"
+	@echo "... src/bindings/pybind_entry.i"
+	@echo "... src/bindings/pybind_entry.s"
+	@echo "... src/kernels/activations/relu_avx2.o"
+	@echo "... src/kernels/activations/relu_avx2.i"
+	@echo "... src/kernels/activations/relu_avx2.s"
+	@echo "... src/kernels/activations/silu_avx2.o"
+	@echo "... src/kernels/activations/silu_avx2.i"
+	@echo "... src/kernels/activations/silu_avx2.s"
+	@echo "... src/kernels/activations/softmax_avx2.o"
+	@echo "... src/kernels/activations/softmax_avx2.i"
+	@echo "... src/kernels/activations/softmax_avx2.s"
 	@echo "... src/kernels/avx_matmul.o"
 	@echo "... src/kernels/avx_matmul.i"
 	@echo "... src/kernels/avx_matmul.s"
 	@echo "... src/kernels/gemm/avx2_gemm_packed.o"
 	@echo "... src/kernels/gemm/avx2_gemm_packed.i"
 	@echo "... src/kernels/gemm/avx2_gemm_packed.s"
+	@echo "... src/kernels/gemm/gemm_dispatcher.o"
+	@echo "... src/kernels/gemm/gemm_dispatcher.i"
+	@echo "... src/kernels/gemm/gemm_dispatcher.s"
 	@echo "... src/kernels/intrinsic_gelu.o"
 	@echo "... src/kernels/intrinsic_gelu.i"
 	@echo "... src/kernels/intrinsic_gelu.s"

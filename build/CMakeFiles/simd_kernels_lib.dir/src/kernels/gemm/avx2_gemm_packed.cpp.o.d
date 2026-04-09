@@ -173,6 +173,7 @@ CMakeFiles/simd_kernels_lib.dir/src/kernels/gemm/avx2_gemm_packed.cpp.o: \
  /usr/include/c++/13/bits/uniform_int_dist.h \
  /usr/include/c++/13/pstl/glue_algorithm_defs.h \
  /usr/include/c++/13/cassert /usr/include/assert.h \
+ /usr/include/c++/13/atomic \
  /usr/lib/gcc/x86_64-linux-gnu/13/include/immintrin.h \
  /usr/lib/gcc/x86_64-linux-gnu/13/include/x86gprintrin.h \
  /usr/lib/gcc/x86_64-linux-gnu/13/include/ia32intrin.h \

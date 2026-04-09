@@ -619,3 +619,44 @@ events:
         
       exitCode: 0
 ...
+
+---
+events:
+  -
+    kind: "try_compile-v1"
+    backtrace:
+      - "/usr/share/cmake-3.28/Modules/Internal/CheckSourceCompiles.cmake:101 (try_compile)"
+      - "/usr/share/cmake-3.28/Modules/Internal/CheckCompilerFlag.cmake:18 (cmake_check_source_compiles)"
+      - "/usr/share/cmake-3.28/Modules/CheckCXXCompilerFlag.cmake:34 (cmake_check_compiler_flag)"
+      - "/home/codespace/.python/current/lib/python3.12/site-packages/pybind11/share/cmake/pybind11/pybind11Common.cmake:332 (check_cxx_compiler_flag)"
+      - "/home/codespace/.python/current/lib/python3.12/site-packages/pybind11/share/cmake/pybind11/pybind11Common.cmake:377 (_pybind11_return_if_cxx_and_linker_flags_work)"
+      - "/home/codespace/.python/current/lib/python3.12/site-packages/pybind11/share/cmake/pybind11/pybind11Common.cmake:438 (_pybind11_generate_lto)"
+      - "/home/codespace/.python/current/lib/python3.12/site-packages/pybind11/share/cmake/pybind11/pybind11Config.cmake:257 (include)"
+      - "CMakeLists.txt:10 (find_package)"
+    checks:
+      - "Performing Test HAS_FLTO_AUTO"
+    directories:
+      source: "/workspaces/SIMD-Microkernels-for-ML-Workloads/build/CMakeFiles/CMakeScratch/TryCompile-Ddrp5z"
+      binary: "/workspaces/SIMD-Microkernels-for-ML-Workloads/build/CMakeFiles/CMakeScratch/TryCompile-Ddrp5z"
+    cmakeVariables:
+      CMAKE_CXX_FLAGS: ""
+      CMAKE_CXX_FLAGS_DEBUG: "-g"
+      CMAKE_EXE_LINKER_FLAGS: ""
+    buildResult:
+      variable: "HAS_FLTO_AUTO"
+      cached: true
+      stdout: |
+        Change Dir: '/workspaces/SIMD-Microkernels-for-ML-Workloads/build/CMakeFiles/CMakeScratch/TryCompile-Ddrp5z'
+        
+        Run Build Command(s): /usr/bin/cmake -E env VERBOSE=1 /usr/bin/gmake -f Makefile cmTC_7ed8c/fast
+        /usr/bin/gmake  -f CMakeFiles/cmTC_7ed8c.dir/build.make CMakeFiles/cmTC_7ed8c.dir/build
+        gmake[1]: Entering directory '/workspaces/SIMD-Microkernels-for-ML-Workloads/build/CMakeFiles/CMakeScratch/TryCompile-Ddrp5z'
+        Building CXX object CMakeFiles/cmTC_7ed8c.dir/src.cxx.o
+        /usr/bin/c++ -DHAS_FLTO_AUTO  -std=gnu++17   -flto=auto -fno-fat-lto-objects -o CMakeFiles/cmTC_7ed8c.dir/src.cxx.o -c /workspaces/SIMD-Microkernels-for-ML-Workloads/build/CMakeFiles/CMakeScratch/TryCompile-Ddrp5z/src.cxx
+        Linking CXX executable cmTC_7ed8c
+        /usr/bin/cmake -E cmake_link_script CMakeFiles/cmTC_7ed8c.dir/link.txt --verbose=1
+        /usr/bin/c++ CMakeFiles/cmTC_7ed8c.dir/src.cxx.o -o cmTC_7ed8c  -flto=auto 
+        gmake[1]: Leaving directory '/workspaces/SIMD-Microkernels-for-ML-Workloads/build/CMakeFiles/CMakeScratch/TryCompile-Ddrp5z'
+        
+      exitCode: 0
+...
