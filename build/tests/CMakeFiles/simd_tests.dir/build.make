@@ -69,10 +69,24 @@ include tests/CMakeFiles/simd_tests.dir/progress.make
 # Include the compile flags for this target's objects.
 include tests/CMakeFiles/simd_tests.dir/flags.make
 
+tests/CMakeFiles/simd_tests.dir/test_runner.cpp.o: tests/CMakeFiles/simd_tests.dir/flags.make
+tests/CMakeFiles/simd_tests.dir/test_runner.cpp.o: /workspaces/SIMD-Microkernels-for-ML-Workloads/tests/test_runner.cpp
+tests/CMakeFiles/simd_tests.dir/test_runner.cpp.o: tests/CMakeFiles/simd_tests.dir/compiler_depend.ts
+	@$(CMAKE_COMMAND) -E cmake_echo_color "--switch=$(COLOR)" --green --progress-dir=/workspaces/SIMD-Microkernels-for-ML-Workloads/build/CMakeFiles --progress-num=$(CMAKE_PROGRESS_1) "Building CXX object tests/CMakeFiles/simd_tests.dir/test_runner.cpp.o"
+	cd /workspaces/SIMD-Microkernels-for-ML-Workloads/build/tests && /usr/bin/c++ $(CXX_DEFINES) $(CXX_INCLUDES) $(CXX_FLAGS) -MD -MT tests/CMakeFiles/simd_tests.dir/test_runner.cpp.o -MF CMakeFiles/simd_tests.dir/test_runner.cpp.o.d -o CMakeFiles/simd_tests.dir/test_runner.cpp.o -c /workspaces/SIMD-Microkernels-for-ML-Workloads/tests/test_runner.cpp
+
+tests/CMakeFiles/simd_tests.dir/test_runner.cpp.i: cmake_force
+	@$(CMAKE_COMMAND) -E cmake_echo_color "--switch=$(COLOR)" --green "Preprocessing CXX source to CMakeFiles/simd_tests.dir/test_runner.cpp.i"
+	cd /workspaces/SIMD-Microkernels-for-ML-Workloads/build/tests && /usr/bin/c++ $(CXX_DEFINES) $(CXX_INCLUDES) $(CXX_FLAGS) -E /workspaces/SIMD-Microkernels-for-ML-Workloads/tests/test_runner.cpp > CMakeFiles/simd_tests.dir/test_runner.cpp.i
+
+tests/CMakeFiles/simd_tests.dir/test_runner.cpp.s: cmake_force
+	@$(CMAKE_COMMAND) -E cmake_echo_color "--switch=$(COLOR)" --green "Compiling CXX source to assembly CMakeFiles/simd_tests.dir/test_runner.cpp.s"
+	cd /workspaces/SIMD-Microkernels-for-ML-Workloads/build/tests && /usr/bin/c++ $(CXX_DEFINES) $(CXX_INCLUDES) $(CXX_FLAGS) -S /workspaces/SIMD-Microkernels-for-ML-Workloads/tests/test_runner.cpp -o CMakeFiles/simd_tests.dir/test_runner.cpp.s
+
 tests/CMakeFiles/simd_tests.dir/test_alignment.cpp.o: tests/CMakeFiles/simd_tests.dir/flags.make
 tests/CMakeFiles/simd_tests.dir/test_alignment.cpp.o: /workspaces/SIMD-Microkernels-for-ML-Workloads/tests/test_alignment.cpp
 tests/CMakeFiles/simd_tests.dir/test_alignment.cpp.o: tests/CMakeFiles/simd_tests.dir/compiler_depend.ts
-	@$(CMAKE_COMMAND) -E cmake_echo_color "--switch=$(COLOR)" --green --progress-dir=/workspaces/SIMD-Microkernels-for-ML-Workloads/build/CMakeFiles --progress-num=$(CMAKE_PROGRESS_1) "Building CXX object tests/CMakeFiles/simd_tests.dir/test_alignment.cpp.o"
+	@$(CMAKE_COMMAND) -E cmake_echo_color "--switch=$(COLOR)" --green --progress-dir=/workspaces/SIMD-Microkernels-for-ML-Workloads/build/CMakeFiles --progress-num=$(CMAKE_PROGRESS_2) "Building CXX object tests/CMakeFiles/simd_tests.dir/test_alignment.cpp.o"
 	cd /workspaces/SIMD-Microkernels-for-ML-Workloads/build/tests && /usr/bin/c++ $(CXX_DEFINES) $(CXX_INCLUDES) $(CXX_FLAGS) -MD -MT tests/CMakeFiles/simd_tests.dir/test_alignment.cpp.o -MF CMakeFiles/simd_tests.dir/test_alignment.cpp.o.d -o CMakeFiles/simd_tests.dir/test_alignment.cpp.o -c /workspaces/SIMD-Microkernels-for-ML-Workloads/tests/test_alignment.cpp
 
 tests/CMakeFiles/simd_tests.dir/test_alignment.cpp.i: cmake_force
@@ -86,7 +100,7 @@ tests/CMakeFiles/simd_tests.dir/test_alignment.cpp.s: cmake_force
 tests/CMakeFiles/simd_tests.dir/test_gelu.cpp.o: tests/CMakeFiles/simd_tests.dir/flags.make
 tests/CMakeFiles/simd_tests.dir/test_gelu.cpp.o: /workspaces/SIMD-Microkernels-for-ML-Workloads/tests/test_gelu.cpp
 tests/CMakeFiles/simd_tests.dir/test_gelu.cpp.o: tests/CMakeFiles/simd_tests.dir/compiler_depend.ts
-	@$(CMAKE_COMMAND) -E cmake_echo_color "--switch=$(COLOR)" --green --progress-dir=/workspaces/SIMD-Microkernels-for-ML-Workloads/build/CMakeFiles --progress-num=$(CMAKE_PROGRESS_2) "Building CXX object tests/CMakeFiles/simd_tests.dir/test_gelu.cpp.o"
+	@$(CMAKE_COMMAND) -E cmake_echo_color "--switch=$(COLOR)" --green --progress-dir=/workspaces/SIMD-Microkernels-for-ML-Workloads/build/CMakeFiles --progress-num=$(CMAKE_PROGRESS_3) "Building CXX object tests/CMakeFiles/simd_tests.dir/test_gelu.cpp.o"
 	cd /workspaces/SIMD-Microkernels-for-ML-Workloads/build/tests && /usr/bin/c++ $(CXX_DEFINES) $(CXX_INCLUDES) $(CXX_FLAGS) -MD -MT tests/CMakeFiles/simd_tests.dir/test_gelu.cpp.o -MF CMakeFiles/simd_tests.dir/test_gelu.cpp.o.d -o CMakeFiles/simd_tests.dir/test_gelu.cpp.o -c /workspaces/SIMD-Microkernels-for-ML-Workloads/tests/test_gelu.cpp
 
 tests/CMakeFiles/simd_tests.dir/test_gelu.cpp.i: cmake_force
@@ -100,7 +114,7 @@ tests/CMakeFiles/simd_tests.dir/test_gelu.cpp.s: cmake_force
 tests/CMakeFiles/simd_tests.dir/test_gemm.cpp.o: tests/CMakeFiles/simd_tests.dir/flags.make
 tests/CMakeFiles/simd_tests.dir/test_gemm.cpp.o: /workspaces/SIMD-Microkernels-for-ML-Workloads/tests/test_gemm.cpp
 tests/CMakeFiles/simd_tests.dir/test_gemm.cpp.o: tests/CMakeFiles/simd_tests.dir/compiler_depend.ts
-	@$(CMAKE_COMMAND) -E cmake_echo_color "--switch=$(COLOR)" --green --progress-dir=/workspaces/SIMD-Microkernels-for-ML-Workloads/build/CMakeFiles --progress-num=$(CMAKE_PROGRESS_3) "Building CXX object tests/CMakeFiles/simd_tests.dir/test_gemm.cpp.o"
+	@$(CMAKE_COMMAND) -E cmake_echo_color "--switch=$(COLOR)" --green --progress-dir=/workspaces/SIMD-Microkernels-for-ML-Workloads/build/CMakeFiles --progress-num=$(CMAKE_PROGRESS_4) "Building CXX object tests/CMakeFiles/simd_tests.dir/test_gemm.cpp.o"
 	cd /workspaces/SIMD-Microkernels-for-ML-Workloads/build/tests && /usr/bin/c++ $(CXX_DEFINES) $(CXX_INCLUDES) $(CXX_FLAGS) -MD -MT tests/CMakeFiles/simd_tests.dir/test_gemm.cpp.o -MF CMakeFiles/simd_tests.dir/test_gemm.cpp.o.d -o CMakeFiles/simd_tests.dir/test_gemm.cpp.o -c /workspaces/SIMD-Microkernels-for-ML-Workloads/tests/test_gemm.cpp
 
 tests/CMakeFiles/simd_tests.dir/test_gemm.cpp.i: cmake_force
@@ -114,7 +128,7 @@ tests/CMakeFiles/simd_tests.dir/test_gemm.cpp.s: cmake_force
 tests/CMakeFiles/simd_tests.dir/test_gemm_packed.cpp.o: tests/CMakeFiles/simd_tests.dir/flags.make
 tests/CMakeFiles/simd_tests.dir/test_gemm_packed.cpp.o: /workspaces/SIMD-Microkernels-for-ML-Workloads/tests/test_gemm_packed.cpp
 tests/CMakeFiles/simd_tests.dir/test_gemm_packed.cpp.o: tests/CMakeFiles/simd_tests.dir/compiler_depend.ts
-	@$(CMAKE_COMMAND) -E cmake_echo_color "--switch=$(COLOR)" --green --progress-dir=/workspaces/SIMD-Microkernels-for-ML-Workloads/build/CMakeFiles --progress-num=$(CMAKE_PROGRESS_4) "Building CXX object tests/CMakeFiles/simd_tests.dir/test_gemm_packed.cpp.o"
+	@$(CMAKE_COMMAND) -E cmake_echo_color "--switch=$(COLOR)" --green --progress-dir=/workspaces/SIMD-Microkernels-for-ML-Workloads/build/CMakeFiles --progress-num=$(CMAKE_PROGRESS_5) "Building CXX object tests/CMakeFiles/simd_tests.dir/test_gemm_packed.cpp.o"
 	cd /workspaces/SIMD-Microkernels-for-ML-Workloads/build/tests && /usr/bin/c++ $(CXX_DEFINES) $(CXX_INCLUDES) $(CXX_FLAGS) -MD -MT tests/CMakeFiles/simd_tests.dir/test_gemm_packed.cpp.o -MF CMakeFiles/simd_tests.dir/test_gemm_packed.cpp.o.d -o CMakeFiles/simd_tests.dir/test_gemm_packed.cpp.o -c /workspaces/SIMD-Microkernels-for-ML-Workloads/tests/test_gemm_packed.cpp
 
 tests/CMakeFiles/simd_tests.dir/test_gemm_packed.cpp.i: cmake_force
@@ -127,6 +141,7 @@ tests/CMakeFiles/simd_tests.dir/test_gemm_packed.cpp.s: cmake_force
 
 # Object files for target simd_tests
 simd_tests_OBJECTS = \
+"CMakeFiles/simd_tests.dir/test_runner.cpp.o" \
 "CMakeFiles/simd_tests.dir/test_alignment.cpp.o" \
 "CMakeFiles/simd_tests.dir/test_gelu.cpp.o" \
 "CMakeFiles/simd_tests.dir/test_gemm.cpp.o" \
@@ -135,6 +150,7 @@ simd_tests_OBJECTS = \
 # External object files for target simd_tests
 simd_tests_EXTERNAL_OBJECTS =
 
+tests/simd_tests: tests/CMakeFiles/simd_tests.dir/test_runner.cpp.o
 tests/simd_tests: tests/CMakeFiles/simd_tests.dir/test_alignment.cpp.o
 tests/simd_tests: tests/CMakeFiles/simd_tests.dir/test_gelu.cpp.o
 tests/simd_tests: tests/CMakeFiles/simd_tests.dir/test_gemm.cpp.o
@@ -142,7 +158,7 @@ tests/simd_tests: tests/CMakeFiles/simd_tests.dir/test_gemm_packed.cpp.o
 tests/simd_tests: tests/CMakeFiles/simd_tests.dir/build.make
 tests/simd_tests: tests/libsimd_kernels_precision_lib.a
 tests/simd_tests: tests/CMakeFiles/simd_tests.dir/link.txt
-	@$(CMAKE_COMMAND) -E cmake_echo_color "--switch=$(COLOR)" --green --bold --progress-dir=/workspaces/SIMD-Microkernels-for-ML-Workloads/build/CMakeFiles --progress-num=$(CMAKE_PROGRESS_5) "Linking CXX executable simd_tests"
+	@$(CMAKE_COMMAND) -E cmake_echo_color "--switch=$(COLOR)" --green --bold --progress-dir=/workspaces/SIMD-Microkernels-for-ML-Workloads/build/CMakeFiles --progress-num=$(CMAKE_PROGRESS_6) "Linking CXX executable simd_tests"
 	cd /workspaces/SIMD-Microkernels-for-ML-Workloads/build/tests && $(CMAKE_COMMAND) -E cmake_link_script CMakeFiles/simd_tests.dir/link.txt --verbose=$(VERBOSE)
 
 # Rule to build all files generated by this target.

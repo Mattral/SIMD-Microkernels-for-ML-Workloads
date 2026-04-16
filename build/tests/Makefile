@@ -95,6 +95,51 @@ rebuild_cache:
 rebuild_cache/fast: rebuild_cache
 .PHONY : rebuild_cache/fast
 
+# Special rule for the target list_install_components
+list_install_components:
+	@$(CMAKE_COMMAND) -E cmake_echo_color "--switch=$(COLOR)" --cyan "Available install components are: \"Unspecified\""
+.PHONY : list_install_components
+
+# Special rule for the target list_install_components
+list_install_components/fast: list_install_components
+.PHONY : list_install_components/fast
+
+# Special rule for the target install
+install: preinstall
+	@$(CMAKE_COMMAND) -E cmake_echo_color "--switch=$(COLOR)" --cyan "Install the project..."
+	/usr/bin/cmake -P cmake_install.cmake
+.PHONY : install
+
+# Special rule for the target install
+install/fast: preinstall/fast
+	@$(CMAKE_COMMAND) -E cmake_echo_color "--switch=$(COLOR)" --cyan "Install the project..."
+	/usr/bin/cmake -P cmake_install.cmake
+.PHONY : install/fast
+
+# Special rule for the target install/local
+install/local: preinstall
+	@$(CMAKE_COMMAND) -E cmake_echo_color "--switch=$(COLOR)" --cyan "Installing only the local directory..."
+	/usr/bin/cmake -DCMAKE_INSTALL_LOCAL_ONLY=1 -P cmake_install.cmake
+.PHONY : install/local
+
+# Special rule for the target install/local
+install/local/fast: preinstall/fast
+	@$(CMAKE_COMMAND) -E cmake_echo_color "--switch=$(COLOR)" --cyan "Installing only the local directory..."
+	/usr/bin/cmake -DCMAKE_INSTALL_LOCAL_ONLY=1 -P cmake_install.cmake
+.PHONY : install/local/fast
+
+# Special rule for the target install/strip
+install/strip: preinstall
+	@$(CMAKE_COMMAND) -E cmake_echo_color "--switch=$(COLOR)" --cyan "Installing the project stripped..."
+	/usr/bin/cmake -DCMAKE_INSTALL_DO_STRIP=1 -P cmake_install.cmake
+.PHONY : install/strip
+
+# Special rule for the target install/strip
+install/strip/fast: preinstall/fast
+	@$(CMAKE_COMMAND) -E cmake_echo_color "--switch=$(COLOR)" --cyan "Installing the project stripped..."
+	/usr/bin/cmake -DCMAKE_INSTALL_DO_STRIP=1 -P cmake_install.cmake
+.PHONY : install/strip/fast
+
 # The main all target
 all: cmake_check_build_system
 	cd /workspaces/SIMD-Microkernels-for-ML-Workloads/build && $(CMAKE_COMMAND) -E cmake_progress_start /workspaces/SIMD-Microkernels-for-ML-Workloads/build/CMakeFiles /workspaces/SIMD-Microkernels-for-ML-Workloads/build/tests//CMakeFiles/progress.marks
@@ -153,6 +198,20 @@ simd_tests: tests/CMakeFiles/simd_tests.dir/rule
 simd_tests/fast:
 	cd /workspaces/SIMD-Microkernels-for-ML-Workloads/build && $(MAKE) $(MAKESILENT) -f tests/CMakeFiles/simd_tests.dir/build.make tests/CMakeFiles/simd_tests.dir/build
 .PHONY : simd_tests/fast
+
+# Convenience name for target.
+tests/CMakeFiles/simd_tests_doctest.dir/rule:
+	cd /workspaces/SIMD-Microkernels-for-ML-Workloads/build && $(MAKE) $(MAKESILENT) -f CMakeFiles/Makefile2 tests/CMakeFiles/simd_tests_doctest.dir/rule
+.PHONY : tests/CMakeFiles/simd_tests_doctest.dir/rule
+
+# Convenience name for target.
+simd_tests_doctest: tests/CMakeFiles/simd_tests_doctest.dir/rule
+.PHONY : simd_tests_doctest
+
+# fast build rule for target.
+simd_tests_doctest/fast:
+	cd /workspaces/SIMD-Microkernels-for-ML-Workloads/build && $(MAKE) $(MAKESILENT) -f tests/CMakeFiles/simd_tests_doctest.dir/build.make tests/CMakeFiles/simd_tests_doctest.dir/build
+.PHONY : simd_tests_doctest/fast
 
 __/src/kernels/avx_matmul.o: __/src/kernels/avx_matmul.cpp.o
 .PHONY : __/src/kernels/avx_matmul.o
@@ -232,6 +291,7 @@ test_alignment.o: test_alignment.cpp.o
 # target to build an object file
 test_alignment.cpp.o:
 	cd /workspaces/SIMD-Microkernels-for-ML-Workloads/build && $(MAKE) $(MAKESILENT) -f tests/CMakeFiles/simd_tests.dir/build.make tests/CMakeFiles/simd_tests.dir/test_alignment.cpp.o
+	cd /workspaces/SIMD-Microkernels-for-ML-Workloads/build && $(MAKE) $(MAKESILENT) -f tests/CMakeFiles/simd_tests_doctest.dir/build.make tests/CMakeFiles/simd_tests_doctest.dir/test_alignment.cpp.o
 .PHONY : test_alignment.cpp.o
 
 test_alignment.i: test_alignment.cpp.i
@@ -240,6 +300,7 @@ test_alignment.i: test_alignment.cpp.i
 # target to preprocess a source file
 test_alignment.cpp.i:
 	cd /workspaces/SIMD-Microkernels-for-ML-Workloads/build && $(MAKE) $(MAKESILENT) -f tests/CMakeFiles/simd_tests.dir/build.make tests/CMakeFiles/simd_tests.dir/test_alignment.cpp.i
+	cd /workspaces/SIMD-Microkernels-for-ML-Workloads/build && $(MAKE) $(MAKESILENT) -f tests/CMakeFiles/simd_tests_doctest.dir/build.make tests/CMakeFiles/simd_tests_doctest.dir/test_alignment.cpp.i
 .PHONY : test_alignment.cpp.i
 
 test_alignment.s: test_alignment.cpp.s
@@ -248,7 +309,32 @@ test_alignment.s: test_alignment.cpp.s
 # target to generate assembly for a file
 test_alignment.cpp.s:
 	cd /workspaces/SIMD-Microkernels-for-ML-Workloads/build && $(MAKE) $(MAKESILENT) -f tests/CMakeFiles/simd_tests.dir/build.make tests/CMakeFiles/simd_tests.dir/test_alignment.cpp.s
+	cd /workspaces/SIMD-Microkernels-for-ML-Workloads/build && $(MAKE) $(MAKESILENT) -f tests/CMakeFiles/simd_tests_doctest.dir/build.make tests/CMakeFiles/simd_tests_doctest.dir/test_alignment.cpp.s
 .PHONY : test_alignment.cpp.s
+
+test_doctest.o: test_doctest.cpp.o
+.PHONY : test_doctest.o
+
+# target to build an object file
+test_doctest.cpp.o:
+	cd /workspaces/SIMD-Microkernels-for-ML-Workloads/build && $(MAKE) $(MAKESILENT) -f tests/CMakeFiles/simd_tests_doctest.dir/build.make tests/CMakeFiles/simd_tests_doctest.dir/test_doctest.cpp.o
+.PHONY : test_doctest.cpp.o
+
+test_doctest.i: test_doctest.cpp.i
+.PHONY : test_doctest.i
+
+# target to preprocess a source file
+test_doctest.cpp.i:
+	cd /workspaces/SIMD-Microkernels-for-ML-Workloads/build && $(MAKE) $(MAKESILENT) -f tests/CMakeFiles/simd_tests_doctest.dir/build.make tests/CMakeFiles/simd_tests_doctest.dir/test_doctest.cpp.i
+.PHONY : test_doctest.cpp.i
+
+test_doctest.s: test_doctest.cpp.s
+.PHONY : test_doctest.s
+
+# target to generate assembly for a file
+test_doctest.cpp.s:
+	cd /workspaces/SIMD-Microkernels-for-ML-Workloads/build && $(MAKE) $(MAKESILENT) -f tests/CMakeFiles/simd_tests_doctest.dir/build.make tests/CMakeFiles/simd_tests_doctest.dir/test_doctest.cpp.s
+.PHONY : test_doctest.cpp.s
 
 test_gelu.o: test_gelu.cpp.o
 .PHONY : test_gelu.o
@@ -256,6 +342,7 @@ test_gelu.o: test_gelu.cpp.o
 # target to build an object file
 test_gelu.cpp.o:
 	cd /workspaces/SIMD-Microkernels-for-ML-Workloads/build && $(MAKE) $(MAKESILENT) -f tests/CMakeFiles/simd_tests.dir/build.make tests/CMakeFiles/simd_tests.dir/test_gelu.cpp.o
+	cd /workspaces/SIMD-Microkernels-for-ML-Workloads/build && $(MAKE) $(MAKESILENT) -f tests/CMakeFiles/simd_tests_doctest.dir/build.make tests/CMakeFiles/simd_tests_doctest.dir/test_gelu.cpp.o
 .PHONY : test_gelu.cpp.o
 
 test_gelu.i: test_gelu.cpp.i
@@ -264,6 +351,7 @@ test_gelu.i: test_gelu.cpp.i
 # target to preprocess a source file
 test_gelu.cpp.i:
 	cd /workspaces/SIMD-Microkernels-for-ML-Workloads/build && $(MAKE) $(MAKESILENT) -f tests/CMakeFiles/simd_tests.dir/build.make tests/CMakeFiles/simd_tests.dir/test_gelu.cpp.i
+	cd /workspaces/SIMD-Microkernels-for-ML-Workloads/build && $(MAKE) $(MAKESILENT) -f tests/CMakeFiles/simd_tests_doctest.dir/build.make tests/CMakeFiles/simd_tests_doctest.dir/test_gelu.cpp.i
 .PHONY : test_gelu.cpp.i
 
 test_gelu.s: test_gelu.cpp.s
@@ -272,6 +360,7 @@ test_gelu.s: test_gelu.cpp.s
 # target to generate assembly for a file
 test_gelu.cpp.s:
 	cd /workspaces/SIMD-Microkernels-for-ML-Workloads/build && $(MAKE) $(MAKESILENT) -f tests/CMakeFiles/simd_tests.dir/build.make tests/CMakeFiles/simd_tests.dir/test_gelu.cpp.s
+	cd /workspaces/SIMD-Microkernels-for-ML-Workloads/build && $(MAKE) $(MAKESILENT) -f tests/CMakeFiles/simd_tests_doctest.dir/build.make tests/CMakeFiles/simd_tests_doctest.dir/test_gelu.cpp.s
 .PHONY : test_gelu.cpp.s
 
 test_gemm.o: test_gemm.cpp.o
@@ -280,6 +369,7 @@ test_gemm.o: test_gemm.cpp.o
 # target to build an object file
 test_gemm.cpp.o:
 	cd /workspaces/SIMD-Microkernels-for-ML-Workloads/build && $(MAKE) $(MAKESILENT) -f tests/CMakeFiles/simd_tests.dir/build.make tests/CMakeFiles/simd_tests.dir/test_gemm.cpp.o
+	cd /workspaces/SIMD-Microkernels-for-ML-Workloads/build && $(MAKE) $(MAKESILENT) -f tests/CMakeFiles/simd_tests_doctest.dir/build.make tests/CMakeFiles/simd_tests_doctest.dir/test_gemm.cpp.o
 .PHONY : test_gemm.cpp.o
 
 test_gemm.i: test_gemm.cpp.i
@@ -288,6 +378,7 @@ test_gemm.i: test_gemm.cpp.i
 # target to preprocess a source file
 test_gemm.cpp.i:
 	cd /workspaces/SIMD-Microkernels-for-ML-Workloads/build && $(MAKE) $(MAKESILENT) -f tests/CMakeFiles/simd_tests.dir/build.make tests/CMakeFiles/simd_tests.dir/test_gemm.cpp.i
+	cd /workspaces/SIMD-Microkernels-for-ML-Workloads/build && $(MAKE) $(MAKESILENT) -f tests/CMakeFiles/simd_tests_doctest.dir/build.make tests/CMakeFiles/simd_tests_doctest.dir/test_gemm.cpp.i
 .PHONY : test_gemm.cpp.i
 
 test_gemm.s: test_gemm.cpp.s
@@ -296,6 +387,7 @@ test_gemm.s: test_gemm.cpp.s
 # target to generate assembly for a file
 test_gemm.cpp.s:
 	cd /workspaces/SIMD-Microkernels-for-ML-Workloads/build && $(MAKE) $(MAKESILENT) -f tests/CMakeFiles/simd_tests.dir/build.make tests/CMakeFiles/simd_tests.dir/test_gemm.cpp.s
+	cd /workspaces/SIMD-Microkernels-for-ML-Workloads/build && $(MAKE) $(MAKESILENT) -f tests/CMakeFiles/simd_tests_doctest.dir/build.make tests/CMakeFiles/simd_tests_doctest.dir/test_gemm.cpp.s
 .PHONY : test_gemm.cpp.s
 
 test_gemm_packed.o: test_gemm_packed.cpp.o
@@ -304,6 +396,7 @@ test_gemm_packed.o: test_gemm_packed.cpp.o
 # target to build an object file
 test_gemm_packed.cpp.o:
 	cd /workspaces/SIMD-Microkernels-for-ML-Workloads/build && $(MAKE) $(MAKESILENT) -f tests/CMakeFiles/simd_tests.dir/build.make tests/CMakeFiles/simd_tests.dir/test_gemm_packed.cpp.o
+	cd /workspaces/SIMD-Microkernels-for-ML-Workloads/build && $(MAKE) $(MAKESILENT) -f tests/CMakeFiles/simd_tests_doctest.dir/build.make tests/CMakeFiles/simd_tests_doctest.dir/test_gemm_packed.cpp.o
 .PHONY : test_gemm_packed.cpp.o
 
 test_gemm_packed.i: test_gemm_packed.cpp.i
@@ -312,6 +405,7 @@ test_gemm_packed.i: test_gemm_packed.cpp.i
 # target to preprocess a source file
 test_gemm_packed.cpp.i:
 	cd /workspaces/SIMD-Microkernels-for-ML-Workloads/build && $(MAKE) $(MAKESILENT) -f tests/CMakeFiles/simd_tests.dir/build.make tests/CMakeFiles/simd_tests.dir/test_gemm_packed.cpp.i
+	cd /workspaces/SIMD-Microkernels-for-ML-Workloads/build && $(MAKE) $(MAKESILENT) -f tests/CMakeFiles/simd_tests_doctest.dir/build.make tests/CMakeFiles/simd_tests_doctest.dir/test_gemm_packed.cpp.i
 .PHONY : test_gemm_packed.cpp.i
 
 test_gemm_packed.s: test_gemm_packed.cpp.s
@@ -320,7 +414,56 @@ test_gemm_packed.s: test_gemm_packed.cpp.s
 # target to generate assembly for a file
 test_gemm_packed.cpp.s:
 	cd /workspaces/SIMD-Microkernels-for-ML-Workloads/build && $(MAKE) $(MAKESILENT) -f tests/CMakeFiles/simd_tests.dir/build.make tests/CMakeFiles/simd_tests.dir/test_gemm_packed.cpp.s
+	cd /workspaces/SIMD-Microkernels-for-ML-Workloads/build && $(MAKE) $(MAKESILENT) -f tests/CMakeFiles/simd_tests_doctest.dir/build.make tests/CMakeFiles/simd_tests_doctest.dir/test_gemm_packed.cpp.s
 .PHONY : test_gemm_packed.cpp.s
+
+test_runner.o: test_runner.cpp.o
+.PHONY : test_runner.o
+
+# target to build an object file
+test_runner.cpp.o:
+	cd /workspaces/SIMD-Microkernels-for-ML-Workloads/build && $(MAKE) $(MAKESILENT) -f tests/CMakeFiles/simd_tests.dir/build.make tests/CMakeFiles/simd_tests.dir/test_runner.cpp.o
+.PHONY : test_runner.cpp.o
+
+test_runner.i: test_runner.cpp.i
+.PHONY : test_runner.i
+
+# target to preprocess a source file
+test_runner.cpp.i:
+	cd /workspaces/SIMD-Microkernels-for-ML-Workloads/build && $(MAKE) $(MAKESILENT) -f tests/CMakeFiles/simd_tests.dir/build.make tests/CMakeFiles/simd_tests.dir/test_runner.cpp.i
+.PHONY : test_runner.cpp.i
+
+test_runner.s: test_runner.cpp.s
+.PHONY : test_runner.s
+
+# target to generate assembly for a file
+test_runner.cpp.s:
+	cd /workspaces/SIMD-Microkernels-for-ML-Workloads/build && $(MAKE) $(MAKESILENT) -f tests/CMakeFiles/simd_tests.dir/build.make tests/CMakeFiles/simd_tests.dir/test_runner.cpp.s
+.PHONY : test_runner.cpp.s
+
+test_threads.o: test_threads.cpp.o
+.PHONY : test_threads.o
+
+# target to build an object file
+test_threads.cpp.o:
+	cd /workspaces/SIMD-Microkernels-for-ML-Workloads/build && $(MAKE) $(MAKESILENT) -f tests/CMakeFiles/simd_tests_doctest.dir/build.make tests/CMakeFiles/simd_tests_doctest.dir/test_threads.cpp.o
+.PHONY : test_threads.cpp.o
+
+test_threads.i: test_threads.cpp.i
+.PHONY : test_threads.i
+
+# target to preprocess a source file
+test_threads.cpp.i:
+	cd /workspaces/SIMD-Microkernels-for-ML-Workloads/build && $(MAKE) $(MAKESILENT) -f tests/CMakeFiles/simd_tests_doctest.dir/build.make tests/CMakeFiles/simd_tests_doctest.dir/test_threads.cpp.i
+.PHONY : test_threads.cpp.i
+
+test_threads.s: test_threads.cpp.s
+.PHONY : test_threads.s
+
+# target to generate assembly for a file
+test_threads.cpp.s:
+	cd /workspaces/SIMD-Microkernels-for-ML-Workloads/build && $(MAKE) $(MAKESILENT) -f tests/CMakeFiles/simd_tests_doctest.dir/build.make tests/CMakeFiles/simd_tests_doctest.dir/test_threads.cpp.s
+.PHONY : test_threads.cpp.s
 
 # Help Target
 help:
@@ -329,10 +472,15 @@ help:
 	@echo "... clean"
 	@echo "... depend"
 	@echo "... edit_cache"
+	@echo "... install"
+	@echo "... install/local"
+	@echo "... install/strip"
+	@echo "... list_install_components"
 	@echo "... rebuild_cache"
 	@echo "... test"
 	@echo "... simd_kernels_precision_lib"
 	@echo "... simd_tests"
+	@echo "... simd_tests_doctest"
 	@echo "... __/src/kernels/avx_matmul.o"
 	@echo "... __/src/kernels/avx_matmul.i"
 	@echo "... __/src/kernels/avx_matmul.s"
@@ -345,6 +493,9 @@ help:
 	@echo "... test_alignment.o"
 	@echo "... test_alignment.i"
 	@echo "... test_alignment.s"
+	@echo "... test_doctest.o"
+	@echo "... test_doctest.i"
+	@echo "... test_doctest.s"
 	@echo "... test_gelu.o"
 	@echo "... test_gelu.i"
 	@echo "... test_gelu.s"
@@ -354,6 +505,12 @@ help:
 	@echo "... test_gemm_packed.o"
 	@echo "... test_gemm_packed.i"
 	@echo "... test_gemm_packed.s"
+	@echo "... test_runner.o"
+	@echo "... test_runner.i"
+	@echo "... test_runner.s"
+	@echo "... test_threads.o"
+	@echo "... test_threads.i"
+	@echo "... test_threads.s"
 .PHONY : help
 
 

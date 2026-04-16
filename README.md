@@ -1,16 +1,17 @@
 
 # IntrinsicML: SIMD Microkernels for ML Workloads
 
-Lightweight C++ implementations of SIMD-optimized microkernels for common ML primitives, with Python bindings and benchmarking utilities.
+Lightweight C++ implementations of SIMD-optimized microkernels for ML primitives, with Python bindings, benchmark automation, and optional OpenMP support.
 
 This project explores:
 
 * Vectorized GEMM (FP32) using AVX2/FMA
-* SIMD implementations of activation functions (GeLU)
-* Cache-aware tiling and memory alignment
-* Low-overhead benchmarking using CPU cycle counters
+* SIMD implementations of activation functions (GeLU, ReLU, SiLU, Softmax)
+* Cache-aware blocking and memory alignment
+* Low-overhead benchmarking with JSON output
+* Optional OpenMP multithreading for GEMM
 
-> ⚠️ This is an experimental project intended for learning and exploration. It is **not a replacement for production libraries** such as MKL, OpenBLAS, or oneDNN.
+This repository is intended as an educational and experimental reference for low-level kernel design. It is not intended as a drop-in replacement for optimized production BLAS libraries.
 
 ---
 
@@ -40,9 +41,21 @@ src/
 └── main_bench.cpp           # Benchmark harness (RDTSC-based)
 
 tests/
-├── test_gemm.cpp
+├── test_alignment.cpp
 ├── test_gelu.cpp
-└── test_precision.py
+├── test_gemm.cpp
+├── test_gemm_packed.cpp
+├── test_threads.cpp
+└── test_doctest.cpp
+
+benchmarks/
+├── run_bench.sh
+└── results/
+    └── bench_results.json
+
+DESIGN.md
+BENCHMARKS.md
+CITATION.cff
 ```
 
 ---
@@ -53,9 +66,15 @@ tests/
 
 ```bash
 mkdir build && cd build
-cmake .. -DCMAKE_BUILD_TYPE=Release
+cmake .. -DCMAKE_BUILD_TYPE=Release -DSIMD_ML_OPENMP=ON
 cmake --build . --parallel
-./bench
+./bench --json ../benchmarks/results/bench_results.json
+```
+
+Or run the packaged benchmark automation script:
+
+```bash
+./benchmarks/run_bench.sh
 ```
 
 ### Python Extension

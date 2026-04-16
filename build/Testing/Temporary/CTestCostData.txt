@@ -1,0 +1,2 @@
+simd_tests_doctest 1 6.38083
+---

@@ -81,20 +81,39 @@ clean: tests/clean
 .PHONY : clean
 
 #=============================================================================
+# Directory level rules for directory _deps/doctest-build
+
+# Recursive "all" directory target.
+_deps/doctest-build/all:
+.PHONY : _deps/doctest-build/all
+
+# Recursive "preinstall" directory target.
+_deps/doctest-build/preinstall:
+.PHONY : _deps/doctest-build/preinstall
+
+# Recursive "clean" directory target.
+_deps/doctest-build/clean: _deps/doctest-build/CMakeFiles/doctest_with_main.dir/clean
+.PHONY : _deps/doctest-build/clean
+
+#=============================================================================
 # Directory level rules for directory tests
 
 # Recursive "all" directory target.
 tests/all: tests/CMakeFiles/simd_kernels_precision_lib.dir/all
 tests/all: tests/CMakeFiles/simd_tests.dir/all
+tests/all: tests/CMakeFiles/simd_tests_doctest.dir/all
+tests/all: _deps/doctest-build/all
 .PHONY : tests/all
 
 # Recursive "preinstall" directory target.
-tests/preinstall:
+tests/preinstall: _deps/doctest-build/preinstall
 .PHONY : tests/preinstall
 
 # Recursive "clean" directory target.
 tests/clean: tests/CMakeFiles/simd_kernels_precision_lib.dir/clean
 tests/clean: tests/CMakeFiles/simd_tests.dir/clean
+tests/clean: tests/CMakeFiles/simd_tests_doctest.dir/clean
+tests/clean: _deps/doctest-build/clean
 .PHONY : tests/clean
 
 #=============================================================================
@@ -104,7 +123,7 @@ tests/clean: tests/CMakeFiles/simd_tests.dir/clean
 CMakeFiles/simd_kernels_lib.dir/all:
 	$(MAKE) $(MAKESILENT) -f CMakeFiles/simd_kernels_lib.dir/build.make CMakeFiles/simd_kernels_lib.dir/depend
 	$(MAKE) $(MAKESILENT) -f CMakeFiles/simd_kernels_lib.dir/build.make CMakeFiles/simd_kernels_lib.dir/build
-	@$(CMAKE_COMMAND) -E cmake_echo_color "--switch=$(COLOR)" --progress-dir=/workspaces/SIMD-Microkernels-for-ML-Workloads/build/CMakeFiles --progress-num=5,6,7,8,9,10,11,12 "Built target simd_kernels_lib"
+	@$(CMAKE_COMMAND) -E cmake_echo_color "--switch=$(COLOR)" --progress-dir=/workspaces/SIMD-Microkernels-for-ML-Workloads/build/CMakeFiles --progress-num=7,8,9,10,11,12,13,14 "Built target simd_kernels_lib"
 .PHONY : CMakeFiles/simd_kernels_lib.dir/all
 
 # Build rule for subdir invocation for target.
@@ -130,7 +149,7 @@ CMakeFiles/simd_kernels_lib.dir/clean:
 CMakeFiles/simd_kernels.dir/all: CMakeFiles/simd_kernels_lib.dir/all
 	$(MAKE) $(MAKESILENT) -f CMakeFiles/simd_kernels.dir/build.make CMakeFiles/simd_kernels.dir/depend
 	$(MAKE) $(MAKESILENT) -f CMakeFiles/simd_kernels.dir/build.make CMakeFiles/simd_kernels.dir/build
-	@$(CMAKE_COMMAND) -E cmake_echo_color "--switch=$(COLOR)" --progress-dir=/workspaces/SIMD-Microkernels-for-ML-Workloads/build/CMakeFiles --progress-num=3,4 "Built target simd_kernels"
+	@$(CMAKE_COMMAND) -E cmake_echo_color "--switch=$(COLOR)" --progress-dir=/workspaces/SIMD-Microkernels-for-ML-Workloads/build/CMakeFiles --progress-num=5,6 "Built target simd_kernels"
 .PHONY : CMakeFiles/simd_kernels.dir/all
 
 # Build rule for subdir invocation for target.
@@ -182,7 +201,7 @@ CMakeFiles/bench.dir/clean:
 tests/CMakeFiles/simd_kernels_precision_lib.dir/all:
 	$(MAKE) $(MAKESILENT) -f tests/CMakeFiles/simd_kernels_precision_lib.dir/build.make tests/CMakeFiles/simd_kernels_precision_lib.dir/depend
 	$(MAKE) $(MAKESILENT) -f tests/CMakeFiles/simd_kernels_precision_lib.dir/build.make tests/CMakeFiles/simd_kernels_precision_lib.dir/build
-	@$(CMAKE_COMMAND) -E cmake_echo_color "--switch=$(COLOR)" --progress-dir=/workspaces/SIMD-Microkernels-for-ML-Workloads/build/CMakeFiles --progress-num=13,14,15,16 "Built target simd_kernels_precision_lib"
+	@$(CMAKE_COMMAND) -E cmake_echo_color "--switch=$(COLOR)" --progress-dir=/workspaces/SIMD-Microkernels-for-ML-Workloads/build/CMakeFiles --progress-num=15,16,17,18 "Built target simd_kernels_precision_lib"
 .PHONY : tests/CMakeFiles/simd_kernels_precision_lib.dir/all
 
 # Build rule for subdir invocation for target.
@@ -208,12 +227,12 @@ tests/CMakeFiles/simd_kernels_precision_lib.dir/clean:
 tests/CMakeFiles/simd_tests.dir/all: tests/CMakeFiles/simd_kernels_precision_lib.dir/all
 	$(MAKE) $(MAKESILENT) -f tests/CMakeFiles/simd_tests.dir/build.make tests/CMakeFiles/simd_tests.dir/depend
 	$(MAKE) $(MAKESILENT) -f tests/CMakeFiles/simd_tests.dir/build.make tests/CMakeFiles/simd_tests.dir/build
-	@$(CMAKE_COMMAND) -E cmake_echo_color "--switch=$(COLOR)" --progress-dir=/workspaces/SIMD-Microkernels-for-ML-Workloads/build/CMakeFiles --progress-num=17,18,19,20,21 "Built target simd_tests"
+	@$(CMAKE_COMMAND) -E cmake_echo_color "--switch=$(COLOR)" --progress-dir=/workspaces/SIMD-Microkernels-for-ML-Workloads/build/CMakeFiles --progress-num=19,20,21,22,23,24 "Built target simd_tests"
 .PHONY : tests/CMakeFiles/simd_tests.dir/all
 
 # Build rule for subdir invocation for target.
 tests/CMakeFiles/simd_tests.dir/rule: cmake_check_build_system
-	$(CMAKE_COMMAND) -E cmake_progress_start /workspaces/SIMD-Microkernels-for-ML-Workloads/build/CMakeFiles 9
+	$(CMAKE_COMMAND) -E cmake_progress_start /workspaces/SIMD-Microkernels-for-ML-Workloads/build/CMakeFiles 10
 	$(MAKE) $(MAKESILENT) -f CMakeFiles/Makefile2 tests/CMakeFiles/simd_tests.dir/all
 	$(CMAKE_COMMAND) -E cmake_progress_start /workspaces/SIMD-Microkernels-for-ML-Workloads/build/CMakeFiles 0
 .PHONY : tests/CMakeFiles/simd_tests.dir/rule
@@ -226,6 +245,58 @@ simd_tests: tests/CMakeFiles/simd_tests.dir/rule
 tests/CMakeFiles/simd_tests.dir/clean:
 	$(MAKE) $(MAKESILENT) -f tests/CMakeFiles/simd_tests.dir/build.make tests/CMakeFiles/simd_tests.dir/clean
 .PHONY : tests/CMakeFiles/simd_tests.dir/clean
+
+#=============================================================================
+# Target rules for target tests/CMakeFiles/simd_tests_doctest.dir
+
+# All Build rule for target.
+tests/CMakeFiles/simd_tests_doctest.dir/all: tests/CMakeFiles/simd_kernels_precision_lib.dir/all
+	$(MAKE) $(MAKESILENT) -f tests/CMakeFiles/simd_tests_doctest.dir/build.make tests/CMakeFiles/simd_tests_doctest.dir/depend
+	$(MAKE) $(MAKESILENT) -f tests/CMakeFiles/simd_tests_doctest.dir/build.make tests/CMakeFiles/simd_tests_doctest.dir/build
+	@$(CMAKE_COMMAND) -E cmake_echo_color "--switch=$(COLOR)" --progress-dir=/workspaces/SIMD-Microkernels-for-ML-Workloads/build/CMakeFiles --progress-num=25,26,27,28,29,30,31 "Built target simd_tests_doctest"
+.PHONY : tests/CMakeFiles/simd_tests_doctest.dir/all
+
+# Build rule for subdir invocation for target.
+tests/CMakeFiles/simd_tests_doctest.dir/rule: cmake_check_build_system
+	$(CMAKE_COMMAND) -E cmake_progress_start /workspaces/SIMD-Microkernels-for-ML-Workloads/build/CMakeFiles 11
+	$(MAKE) $(MAKESILENT) -f CMakeFiles/Makefile2 tests/CMakeFiles/simd_tests_doctest.dir/all
+	$(CMAKE_COMMAND) -E cmake_progress_start /workspaces/SIMD-Microkernels-for-ML-Workloads/build/CMakeFiles 0
+.PHONY : tests/CMakeFiles/simd_tests_doctest.dir/rule
+
+# Convenience name for target.
+simd_tests_doctest: tests/CMakeFiles/simd_tests_doctest.dir/rule
+.PHONY : simd_tests_doctest
+
+# clean rule for target.
+tests/CMakeFiles/simd_tests_doctest.dir/clean:
+	$(MAKE) $(MAKESILENT) -f tests/CMakeFiles/simd_tests_doctest.dir/build.make tests/CMakeFiles/simd_tests_doctest.dir/clean
+.PHONY : tests/CMakeFiles/simd_tests_doctest.dir/clean
+
+#=============================================================================
+# Target rules for target _deps/doctest-build/CMakeFiles/doctest_with_main.dir
+
+# All Build rule for target.
+_deps/doctest-build/CMakeFiles/doctest_with_main.dir/all:
+	$(MAKE) $(MAKESILENT) -f _deps/doctest-build/CMakeFiles/doctest_with_main.dir/build.make _deps/doctest-build/CMakeFiles/doctest_with_main.dir/depend
+	$(MAKE) $(MAKESILENT) -f _deps/doctest-build/CMakeFiles/doctest_with_main.dir/build.make _deps/doctest-build/CMakeFiles/doctest_with_main.dir/build
+	@$(CMAKE_COMMAND) -E cmake_echo_color "--switch=$(COLOR)" --progress-dir=/workspaces/SIMD-Microkernels-for-ML-Workloads/build/CMakeFiles --progress-num=3,4 "Built target doctest_with_main"
+.PHONY : _deps/doctest-build/CMakeFiles/doctest_with_main.dir/all
+
+# Build rule for subdir invocation for target.
+_deps/doctest-build/CMakeFiles/doctest_with_main.dir/rule: cmake_check_build_system
+	$(CMAKE_COMMAND) -E cmake_progress_start /workspaces/SIMD-Microkernels-for-ML-Workloads/build/CMakeFiles 2
+	$(MAKE) $(MAKESILENT) -f CMakeFiles/Makefile2 _deps/doctest-build/CMakeFiles/doctest_with_main.dir/all
+	$(CMAKE_COMMAND) -E cmake_progress_start /workspaces/SIMD-Microkernels-for-ML-Workloads/build/CMakeFiles 0
+.PHONY : _deps/doctest-build/CMakeFiles/doctest_with_main.dir/rule
+
+# Convenience name for target.
+doctest_with_main: _deps/doctest-build/CMakeFiles/doctest_with_main.dir/rule
+.PHONY : doctest_with_main
+
+# clean rule for target.
+_deps/doctest-build/CMakeFiles/doctest_with_main.dir/clean:
+	$(MAKE) $(MAKESILENT) -f _deps/doctest-build/CMakeFiles/doctest_with_main.dir/build.make _deps/doctest-build/CMakeFiles/doctest_with_main.dir/clean
+.PHONY : _deps/doctest-build/CMakeFiles/doctest_with_main.dir/clean
 
 #=============================================================================
 # Special targets to cleanup operation of make.
