@@ -1,2 +1,3 @@
-simd_tests_doctest 1 6.38083
+simd_tests_doctest 2 3.12519
+simd_tests 1 6.25144
 ---

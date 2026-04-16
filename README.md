@@ -3,6 +3,8 @@
 
 Lightweight C++ implementations of SIMD-optimized microkernels for ML primitives, with Python bindings, benchmark automation, and optional OpenMP support.
 
+This repository is a compact reference implementation for SIMD microkernel design, suitable for systems-level review and benchmarking.
+
 This project explores:
 
 * Vectorized GEMM (FP32) using AVX2/FMA
@@ -53,6 +55,20 @@ benchmarks/
 └── results/
     └── bench_results.json
 
+docs/
+├── README.md
+├── architecture.md
+├── setup.md
+├── security.md
+├── system_design.md
+├── api/
+│   └── python_api.md
+└── design/
+    ├── cache_hierarchy.md
+    ├── gemm_algorithm.md
+    ├── avx2_register_file.md
+    └── performance_model.md
+
 DESIGN.md
 BENCHMARKS.md
 CITATION.cff
@@ -81,7 +97,7 @@ Or run the packaged benchmark automation script:
 
 ```bash
 pip install -e .
-python -c "import simd_kernels; print(simd_kernels.build_info())"
+python -c "import simd_kernels; print(simd_kernels.build_info())"  # returns build metadata as a dict
 ```
 
 ---
@@ -150,11 +166,9 @@ Key details:
 > * No frequency locking
 > * No statistical analysis beyond min-of-N
 
-The current `bench` harness in this repo implements the P0 remediation
-prescriptions: a short TSC calibration to estimate ticks/second, LFENCE/RDTSCP
-serialised timestamps, and optional CPU affinity pinning. The harness reports
-per-configuration cycle counts, elapsed milliseconds, achieved GFLOPS, and a
-utilisation percentage relative to a per-core theoretical peak.
+The current `bench` harness in this repo implements a short TSC calibration to estimate ticks/second, LFENCE/RDTSCP serialized timestamps, and optional CPU affinity pinning. The harness reports per-configuration cycle counts, elapsed milliseconds, achieved GFLOPS, and a utilization percentage relative to a per-core theoretical peak.
+
+See `docs/` for architecture, setup, and performance model details.
 
 For rigorous benchmarking, external tools (e.g., `perf`, VTune) are recommended.
 
@@ -181,15 +195,18 @@ Observations:
 
 ## Limitations
 
-This project intentionally omits many techniques used in production libraries:
+This implementation does not incorporate several production-level optimizations:
 
-* No matrix packing (critical for high-performance GEMM)
 * No architecture-specific tuning (e.g., Skylake vs Zen)
-* No multithreading
-* No NUMA awareness
-* No comparison against MKL/OpenBLAS included yet
+* Limited matrix packing and blocking compared to production BLAS
+* No NUMA awareness or thread placement policy
+* No system-wide performance calibration or counter collection
 
 As a result, performance is **educational, not state-of-the-art**.
+
+## Citation
+
+This repository includes a `CITATION.cff` manifest so the project can be cited consistently in academic or engineering reports.
 
 ## Cache-Arithmetic Derivation (example)
 

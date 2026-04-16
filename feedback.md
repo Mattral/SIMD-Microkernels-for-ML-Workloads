@@ -258,117 +258,7 @@ missing feature that transforms the kernel from single-core to multi-core.
 **Create files:** `benchmarks/bench_gemm.cpp`, `benchmarks/run_suite.sh`,
   `benchmarks/results/gemm_results.json`
 
-**Prompt:**
 
-```
-Replace the RDTSC-only benchmark harness with a statistically rigorous
-benchmarking system. The current harness has no CPU pinning, no frequency
-locking, and reports only minimum-of-N. FAANG performance engineers use
-proper methodology.
-
-FILE: benchmarks/bench_gemm.cpp
-
-Implement a benchmark that:
-
-1. Measurements:
-   - Warm-up: 100 iterations (not timed)
-   - Measured iterations: 1000
-   - Report: mean, p50, p95, p99, min, max (all in nanoseconds and GFLOPS)
-   - Compute GFLOPS: (2 * M * N * K) / (time_ns * 1e-9) / 1e9
-     (factor 2 for multiply + add in FMA)
-
-2. Baselines to compare against (via dynamic linking / dlopen if available,
-   or via a compile-time optional):
-   #ifdef BENCH_OPENBLAS
-     #include <cblas.h>
-     // Run cblas_sgemm with the same parameters
-   #endif
-   #ifdef BENCH_EIGEN
-     #include <Eigen/Dense>
-     // Run Eigen matmul
-   #endif
-   Always run the naive triple-loop as a mandatory fallback baseline.
-
-3. Matrix sizes to benchmark:
-   int sizes[] = {64, 128, 256, 384, 512, 768, 1024, 2048, 4096};
-   For each size S: M = N = K = S (square matrices)
-   Also: non-square workloads representative of LLM layers:
-     {M=1, N=4096, K=4096},   // vector × matrix (decode step)
-     {M=128, N=4096, K=4096}, // small batch × matrix (prefill)
-
-4. Output format:
-   JSON to benchmarks/results/gemm_results.json:
-   {
-     "generated_at": "ISO-8601",
-     "hardware": {
-       "cpu": "...",
-       "isa": "avx2|avx512",
-       "n_cores": 4,
-       "frequency_mhz": 3600,
-       "l1_kb": 32, "l2_kb": 256, "l3_mb": 8
-     },
-     "results": [
-       {
-         "kernel": "avx2_packed",
-         "M": 512, "N": 512, "K": 512,
-         "gflops_p50": 45.2,
-         "gflops_p95": 44.8,
-         "gflops_p99": 43.1,
-         "pct_peak": 0.58,
-         "vs_openblas_ratio": 0.72
-       },
-       ...
-     ]
-   }
-   Also print Markdown table to stdout.
-
-5. pct_peak calculation:
-   theoretical_peak_gflops = 2.0 * freq_ghz * avx2_fma_lanes * n_threads
-   // AVX2 FMA: 2 ops/cycle × 8 FP32/lane = 16 FP32 ops/cycle/core
-   // At 3.6GHz, 1 core: 3.6 × 16 = 57.6 GFLOPS/core
-   pct_peak = measured_gflops / theoretical_peak_gflops
-
-FILE: benchmarks/run_suite.sh
-
-#!/usr/bin/env bash
-set -euo pipefail
-
-echo "=== IntrinsicML Benchmark Suite ==="
-
-# Step 1: Disable CPU frequency scaling (requires sudo; skip gracefully if unavailable)
-if command -v cpupower &>/dev/null; then
-    echo "Locking CPU frequency to performance governor..."
-    sudo cpupower frequency-set -g performance 2>/dev/null || \
-        echo "Warning: Could not lock frequency (run as root for reproducible results)"
-fi
-
-# Step 2: Pin to a single core using taskset
-CORE=0
-echo "Pinning to core ${CORE}"
-TASKSET_CMD="taskset -c ${CORE}"
-
-# Step 3: Run benchmarks
-echo "Running GEMM benchmark..."
-${TASKSET_CMD} ./build/bench_gemm --output benchmarks/results/gemm_results.json
-
-echo "Running activation benchmark..."
-${TASKSET_CMD} ./build/bench_activations --output benchmarks/results/activation_results.json
-
-echo "=== Benchmark complete. Results in benchmarks/results/ ==="
-echo "Methodology: freq-locked (if root), single-core pinned, 1000 trials, p50/p95/p99"
-
-FILE: benchmarks/results/README.md
-
-Document:
-1. Hardware used to generate baseline results (CPU, frequency, L-cache sizes)
-2. Exact command to regenerate: bash benchmarks/run_suite.sh
-3. How to interpret pct_peak (theoretical peak model)
-4. Warning: results are hardware-specific; CI results (no freq lock) are
-   for regression detection only, not absolute comparison
-5. Link to Goto & van de Geijn (2008) for algorithmic background
-
-Commit a real run of gemm_results.json after running the suite.
-```
 
 ---
 
@@ -465,72 +355,6 @@ avx2_gemm_packed.cpp header:
   // Tile sizes (MC=128, KC=256, NC=2048) chosen per DESIGN.md §2 cache model.
 ```
 
----
-
-## BLOCK 10 — Python API: expand pybind11 bindings + type stubs
-
-**File to modify:** `src/bindings/pybind_entry.cpp`
-**Create file:** `simd_kernels.pyi`
-
-**Prompt:**
-
-```
-Expand the Python bindings to expose all new kernels and add type stubs
-for IDE support.
-
-FILE: src/bindings/pybind_entry.cpp (expand)
-
-Expose:
-  simd_kernels.sgemm(A: np.ndarray, B: np.ndarray,
-                     alpha: float = 1.0, beta: float = 0.0,
-                     C: Optional[np.ndarray] = None) -> np.ndarray
-  # Validates: A/B must be float32, C-contiguous, 2D
-  # Returns float32 C-contiguous result array
-  # Error message must be specific: "A must be float32 C-contiguous 2D array"
-
-  simd_kernels.gelu(x: np.ndarray) -> np.ndarray
-  simd_kernels.relu(x: np.ndarray) -> np.ndarray
-  simd_kernels.silu(x: np.ndarray) -> np.ndarray
-  simd_kernels.softmax(x: np.ndarray, axis: int = -1) -> np.ndarray
-
-  simd_kernels.detected_isa() -> str  # "avx512", "avx2", "sse42", "scalar"
-  simd_kernels.build_info() -> dict   # existing, but expand
-  simd_kernels.set_num_threads(n: int) -> None
-  simd_kernels.get_num_threads() -> int
-
-Array input contract (enforce via pybind11):
-  - Must be float32
-  - Must be C-contiguous (F-contiguous triggers a copy with a warning)
-  - Must be non-empty
-  - For sgemm: A.shape[1] must == B.shape[0]
-
-FILE: simd_kernels.pyi  (Python type stub for IDE/mypy support)
-
-from typing import Optional
-import numpy as np
-from numpy.typing import NDArray
-
-def sgemm(A: NDArray[np.float32], B: NDArray[np.float32],
-          alpha: float = ..., beta: float = ...,
-          C: Optional[NDArray[np.float32]] = ...) -> NDArray[np.float32]: ...
-
-def gelu(x: NDArray[np.float32]) -> NDArray[np.float32]: ...
-def relu(x: NDArray[np.float32]) -> NDArray[np.float32]: ...
-def silu(x: NDArray[np.float32]) -> NDArray[np.float32]: ...
-def softmax(x: NDArray[np.float32], axis: int = ...) -> NDArray[np.float32]: ...
-def detected_isa() -> str: ...
-def build_info() -> dict: ...
-def set_num_threads(n: int) -> None: ...
-def get_num_threads() -> int: ...
-
-Update tests/python/test_precision.py to add:
-  - test_sgemm_agrees_numpy: simd_kernels.sgemm(A, B) must agree with
-    np.float32(np.matmul(A.astype(float), B.astype(float))) within 1e-4
-  - test_softmax_agrees_scipy: simd_kernels.softmax(x) must agree with
-    scipy.special.softmax(x) within 1e-5
-  - test_type_error_on_float64: passing float64 array must raise TypeError
-  - test_contiguous_check: F-contiguous input is handled without crash
-```
 
 ---
 
@@ -621,36 +445,25 @@ FILE: CITATION.cff
 Create as GitHub Issue "v2.0.0 upgrade tracker":
 
 **P0 — Core algorithmic gaps (do first, they change the repo's identity)**
-- [ ] BLOCK 1: Packed GEMM (Goto algorithm) — avx2_gemm_packed.cpp
-- [ ] BLOCK 2: Runtime ISA dispatcher (cpuid + kernel_registry)
-- [ ] BLOCK 5: Production benchmark harness (GFLOPS + OpenBLAS comparison)
-- [ ] Commit actual benchmark results to benchmarks/results/
+- [x] BLOCK 1: Packed GEMM (Goto algorithm) — avx2_gemm_packed.cpp
+- [x] BLOCK 2: Runtime ISA dispatcher (cpuid + kernel_registry)
+- [x] BLOCK 5: Production benchmark harness (GFLOPS + OpenBLAS comparison)
+- [x] Commit actual benchmark results to benchmarks/results/
 
 **P1 — Completeness**
-- [ ] BLOCK 3: ReLU, SiLU, Softmax kernels
-- [ ] BLOCK 4: OpenMP multithreading
-- [ ] BLOCK 6: C++ unit tests with doctest + ASan/UBSan
-- [ ] BLOCK 7: CI workflows (build-and-test + bench)
+- [x] BLOCK 3: ReLU, SiLU, Softmax kernels
+- [x] BLOCK 4: OpenMP multithreading
+- [x] BLOCK 6: C++ unit tests with doctest + ASan/UBSan
+- [x] BLOCK 7: CI workflows (build-and-test + bench)
 
 **P2 — Polish**
-- [ ] BLOCK 8: Dockerfile
-- [ ] BLOCK 9: DESIGN.md
-- [ ] BLOCK 10: Expanded pybind11 bindings + .pyi type stubs
-- [ ] BLOCK 11: README overhaul + BENCHMARKS.md + CITATION.cff
+- [x] BLOCK 8: Dockerfile
+- [x] BLOCK 9: DESIGN.md
+- [x] BLOCK 10: Expanded pybind11 bindings + .pyi type stubs
+- [x] BLOCK 11: README overhaul + BENCHMARKS.md + CITATION.cff
 
 ---
 
-## ANSWERED QUESTIONS — SUMMARY TABLE
-
-| Question | Answer | Rationale |
-|---|---|---|
-| 100% test coverage? | 95% on kernel source, 100% on public API | Kernel code needs ULP/precision testing, not branch padding |
-| CI? | Yes — 3 jobs: AVX2, ASan, macOS ARM scalar fallback | Catches UB, platform-specific bugs, and performance regressions |
-| Docker? | Yes — one Dockerfile, pinned GCC + CMake | Reproducible builds without local toolchain setup |
-| Rust? | No rewrite — optional thin PyO3 wrapper only | C++ intrinsics are the right tool; Rust SIMD is less mature for this use case |
-| How to evaluate? | GFLOPS p50/p95/p99 vs OpenBLAS, % of theoretical peak | Industry-standard metric, hardware-independent, comparable across machines |
-| How to document? | DESIGN.md (roofline model, cache tiling, register blocking) + source file headers referencing DESIGN.md sections | Signals systems depth to compiler/hardware team interviewers |
-| How to be top-tier? | Implement packed GEMM, commit real OpenBLAS comparison numbers, add runtime ISA dispatch | These three moves transform it from "demo" to "credible reference" |
 
 ---
 

@@ -1,22 +1,90 @@
-Start testing: Jun 03 17:53 UTC
+Start testing: Jun 03 17:55 UTC
 ----------------------------------------------------------
+1/2 Testing: simd_tests
+1/2 Test: simd_tests
+Command: "/workspaces/SIMD-Microkernels-for-ML-Workloads/build/tests/simd_tests"
+Directory: /workspaces/SIMD-Microkernels-for-ML-Workloads/build/tests
+"simd_tests" start time: Jun 03 17:55 UTC
+Output:
+----------------------------------------------------------
+╔══════════════════════════════════════╗
+║  SIMD-ML-Microkernels  ·  Test Suite ║
+╚══════════════════════════════════════╝
+
+── Alignment Tests ──
+  make_aligned_array<1>: ptr=0x63e9cb7a32c0 aligned64=YES
+  make_aligned_array<7>: ptr=0x63e9cb7a3300 aligned64=YES
+  make_aligned_array<64>: ptr=0x63e9cb7a3380 aligned64=YES
+  make_aligned_array<1000>: ptr=0x63e9cb7a34c0 aligned64=YES
+  make_aligned_array<65536>: ptr=0x719029f16040 aligned64=YES
+  std::vector<float, AlignedAllocator>: ptr=0x63e9cb7a34c0 aligned64=YES
+  Misaligned ptr detection: PASS
+  Overall: ALL PASS
+
+── GeLU Correctness Tests ──
+  GeLU [-5.0, 5.0] n=1024     max_rel_err=0.00e+00  PASS
+  GeLU [-3.0, 3.0] n=8192     max_rel_err=0.00e+00  PASS
+  GeLU [-0.5, 0.5] n=512      max_rel_err=0.00e+00  PASS
+  GeLU [2.0, 8.0] n=256      max_rel_err=0.00e+00  PASS
+  GeLU [-8.0, -2.0] n=256      max_rel_err=0.00e+00  PASS
+  GeLU [-5.0, 5.0] n=7        max_rel_err=0.00e+00  PASS
+  GeLU [-5.0, 5.0] n=1        max_rel_err=0.00e+00  PASS
+  Overall: ALL PASS
+
+── GEMM Correctness Tests ──
+  GEMM [   1×   1×   1]  max_rel_err=0.00e+00  max_abs_err=0.00e+00  PASS
+  GEMM [   8×   8×   8]  max_rel_err=0.00e+00  max_abs_err=0.00e+00  PASS
+  GEMM [  16×  16×  16]  max_rel_err=6.76e-06  max_abs_err=4.77e-07  PASS
+  GEMM [  64×  64×  64]  max_rel_err=3.01e-03  max_abs_err=1.43e-06  PASS
+  GEMM [ 128× 128× 128]  max_rel_err=1.60e-03  max_abs_err=3.81e-06  PASS
+  GEMM [ 256× 256× 256]  max_rel_err=1.46e-03  max_abs_err=5.72e-06  PASS
+  GEMM [ 100×  73×  89]  max_rel_err=5.26e-04  max_abs_err=1.91e-06  PASS
+  GEMM [  33×  17×   5]  max_rel_err=6.60e-06  max_abs_err=2.38e-07  PASS
+  Overall: ALL PASS
+
+── Packed GEMM Correctness Tests ──
+  packed_sgemm [   1×   1×   1]  max_abs_err=0.000e+00  PASS
+  packed_sgemm [   7×   7×   7]  max_abs_err=0.000e+00  PASS
+  packed_sgemm [   8×   8×   8]  max_abs_err=1.192e-07  PASS
+  packed_sgemm [   9×   9×   9]  max_abs_err=2.384e-07  PASS
+  packed_sgemm [  16×  16×  16]  max_abs_err=4.768e-07  PASS
+  packed_sgemm [ 127× 127× 127]  max_abs_err=2.861e-06  PASS
+  packed_sgemm [ 128× 128× 128]  max_abs_err=3.815e-06  PASS
+  packed_sgemm [ 129× 129× 129]  max_abs_err=2.861e-06  PASS
+  packed_sgemm [ 256× 256× 256]  max_abs_err=5.722e-06  PASS
+  packed_sgemm [ 512× 512× 512]  max_abs_err=3.242e-05  PASS
+  packed_sgemm [1024×1024×1024]  max_abs_err=6.866e-05  PASS
+  packed_sgemm [   1×4096×4096]  max_abs_err=0.000e+00  PASS
+  packed_sgemm [  13×  31×  37]  max_abs_err=5.960e-07  PASS
+  packed_sgemm [  32×   7×  17]  max_abs_err=0.000e+00  PASS
+  Overall: ALL PASS
+
+═══ ALL TESTS PASSED ═══
+<end of output>
+Test time =   6.25 sec
+----------------------------------------------------------
+Test Passed.
+"simd_tests" end time: Jun 03 17:55 UTC
+"simd_tests" time elapsed: 00:00:06
+----------------------------------------------------------
+
 2/2 Testing: simd_tests_doctest
 2/2 Test: simd_tests_doctest
 Command: "/workspaces/SIMD-Microkernels-for-ML-Workloads/build/tests/simd_tests_doctest"
 Directory: /workspaces/SIMD-Microkernels-for-ML-Workloads/build/tests
-"simd_tests_doctest" start time: Jun 03 17:53 UTC
+"simd_tests_doctest" start time: Jun 03 17:55 UTC
 Output:
 ----------------------------------------------------------
 [doctest] doctest version is "2.4.12"
 [doctest] run with "--help" for options
 
 ── Alignment Tests ──
-  make_aligned_array<1>: ptr=0x60787d93fdc0 aligned64=YES
-  make_aligned_array<7>: ptr=0x60787d93fe00 aligned64=YES
-  make_aligned_array<64>: ptr=0x60787d93fe80 aligned64=YES
-  make_aligned_array<1000>: ptr=0x60787d93ffc0 aligned64=YES
-  make_aligned_array<65536>: ptr=0x74c170df9040 aligned64=YES
-  std::vector<float, AlignedAllocator>: ptr=0x60787d93ffc0 aligned64=YES
+  make_aligned_array<1>: ptr=0x57b317c8edc0 aligned64=YES
+  make_aligned_array<7>: ptr=0x57b317c8ee00 aligned64=YES
+  make_aligned_array<64>: ptr=0x57b317c8ee80 aligned64=YES
+  make_aligned_array<1000>: ptr=0x57b317c8efc0 aligned64=YES
+  make_aligned_array<65536>: ptr=0x7c5947fdc040 aligned64=YES
+  std::vector<float, AlignedAllocator>: ptr=0x57b317c8efc0 aligned64=YES
   Misaligned ptr detection: PASS
   Overall: ALL PASS
 
@@ -62,11 +130,11 @@ Output:
 [doctest] assertions: 5 | 5 passed | 0 failed |
 [doctest] Status: SUCCESS!
 <end of output>
-Test time =   6.38 sec
+Test time =   6.25 sec
 ----------------------------------------------------------
 Test Passed.
-"simd_tests_doctest" end time: Jun 03 17:53 UTC
+"simd_tests_doctest" end time: Jun 03 17:55 UTC
 "simd_tests_doctest" time elapsed: 00:00:06
 ----------------------------------------------------------
 
-End testing: Jun 03 17:53 UTC
+End testing: Jun 03 17:55 UTC
