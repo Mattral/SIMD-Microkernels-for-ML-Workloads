@@ -1,0 +1,35 @@
+[build-system]
+requires = [
+    "scikit-build-core>=0.6",
+    "pybind11>=2.11",
+    "cmake>=3.22",
+    "ninja",
+]
+build-backend = "scikit_build_core.build"
+
+# ─── Project metadata ──────────────────────────────────────────────────────────
+[project]
+name            = "simd-ml-microkernels"
+version         = "0.1.0"
+description     = "Hand-vectorized AVX2/AVX-512 GEMM and GeLU microkernels with Python bindings"
+readme          = "README.md"
+license         = { file = "LICENSE" }
+requires-python = ">=3.9"
+dependencies    = ["numpy>=1.24"]
+
+[project.optional-dependencies]
+dev  = ["pytest", "torch"]
+bench = ["matplotlib", "tabulate"]
+
+# ─── scikit-build-core settings ───────────────────────────────────────────────
+[tool.scikit-build]
+cmake.build-type     = "Release"
+cmake.verbose        = false
+wheel.packages       = []          # C extension only, no Python package dir
+
+# ─── CMakeLists.txt is the build driver ───────────────────────────────────────
+# See CMakeLists.txt in root for full compiler flags.
+# Key flags applied there:
+#   -O3 -march=native -mfma -mavx2   (or -mavx512f when detected)
+#   -DNDEBUG
+#   -ffast-math  (acceptable for ML kernels; NaN/inf behaviour is undefined anyway)

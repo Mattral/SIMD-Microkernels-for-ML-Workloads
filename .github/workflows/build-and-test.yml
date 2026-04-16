@@ -1,0 +1,76 @@
+name: Build and Test
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+jobs:
+  build-linux-avx2:
+    name: Linux / GCC / AVX2
+    runs-on: ubuntu-22.04
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y cmake ninja-build libpybind11-dev \
+            python3-dev python3-pip clang-15 libopenblas-dev
+          pip install pytest numpy
+
+      - name: Configure (Release, AVX2, with OpenBLAS comparison)
+        run: |
+          cmake -S . -B build -G Ninja \
+            -DCMAKE_BUILD_TYPE=Release \
+            -DCMAKE_CXX_COMPILER=g++ \
+            -DBENCH_OPENBLAS=ON \
+            -DSIMD_ML_OPENMP=ON
+
+      - name: Build
+        run: cmake --build build --parallel
+
+      - name: Run C++ unit tests (Release)
+        run: ctest --test-dir build -R unit_tests_release --output-on-failure
+
+      - name: Run Python precision tests
+        run: |
+          pip install -e .
+          pytest tests/python/ -v
+
+  build-linux-asan:
+    name: Linux / Clang / ASan + UBSan
+    runs-on: ubuntu-22.04
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install
+        run: sudo apt-get install -y cmake ninja-build clang-15 libpybind11-dev python3-dev
+
+      - name: Configure (ASAN)
+        run: |
+          cmake -S . -B build_asan -G Ninja \
+            -DCMAKE_BUILD_TYPE=RelWithDebInfo \
+            -DCMAKE_CXX_COMPILER=clang++-15
+
+      - name: Build ASAN target
+        run: cmake --build build_asan --target tests_asan
+
+      - name: Run ASAN tests
+        run: |
+          ASAN_OPTIONS=detect_leaks=1:abort_on_error=1 \
+          UBSAN_OPTIONS=print_stacktrace=1 \
+          ctest --test-dir build_asan -R unit_tests_asan --output-on-failure
+
+  build-macos:
+    name: macOS / Apple Clang / Scalar fallback
+    runs-on: macos-14   # Apple Silicon — no AVX2
+    steps:
+      - uses: actions/checkout@v4
+      - run: brew install cmake pybind11
+      - name: Configure
+        run: cmake -S . -B build -DCMAKE_BUILD_TYPE=Release
+      - name: Build
+        run: cmake --build build --parallel
+      - name: Test (scalar fallback path)
+        run: ctest --test-dir build --output-on-failure
+        # On ARM, dispatcher must select scalar fallback — test this explicitly

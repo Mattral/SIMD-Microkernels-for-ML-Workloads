@@ -1,0 +1,39 @@
+name: Weekly Benchmark
+
+on:
+  schedule:
+    - cron: '0 4 * * 0'   # Every Sunday at 4 AM UTC
+  workflow_dispatch:        # Also runnable manually
+
+jobs:
+  bench:
+    name: Benchmark smoke
+    runs-on: ubuntu-22.04
+    steps:
+      - uses: actions/checkout@v4
+      - name: Build with OpenBLAS
+        run: |
+          sudo apt-get install -y cmake libopenblas-dev ninja-build libpybind11-dev python3-dev
+          cmake -S . -B build -G Ninja -DCMAKE_BUILD_TYPE=Release -DBENCH_OPENBLAS=ON
+          cmake --build build --parallel
+
+      - name: Run benchmark (no freq lock on GH Actions runner)
+        run: |
+          # Note: GitHub Actions runners are noisy; these numbers are for
+          # regression detection only, not absolute performance claims
+          ./build/bench_gemm --sizes "64,128,256" --iterations 200 \
+            --output benchmarks/results/ci_gemm_results.json
+
+      - name: Upload results
+        uses: actions/upload-artifact@v4
+        with:
+          name: bench-results-${{ github.sha }}
+          path: benchmarks/results/ci_gemm_results.json
+          retention-days: 90
+
+      - name: Performance regression check
+        run: python benchmarks/check_regression.py \
+          --baseline benchmarks/results/gemm_results.json \
+          --current  benchmarks/results/ci_gemm_results.json \
+          --max-regression-pct 15
+        # Fail if throughput drops >15% vs committed baseline
