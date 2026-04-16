@@ -93,6 +93,8 @@ simd_kernels_EXTERNAL_OBJECTS =
 simd_kernels.cpython-312-x86_64-linux-gnu.so: CMakeFiles/simd_kernels.dir/src/bindings/pybind_entry.cpp.o
 simd_kernels.cpython-312-x86_64-linux-gnu.so: CMakeFiles/simd_kernels.dir/build.make
 simd_kernels.cpython-312-x86_64-linux-gnu.so: libsimd_kernels_lib.a
+simd_kernels.cpython-312-x86_64-linux-gnu.so: /usr/lib/gcc/x86_64-linux-gnu/13/libgomp.so
+simd_kernels.cpython-312-x86_64-linux-gnu.so: /usr/lib/x86_64-linux-gnu/libpthread.a
 simd_kernels.cpython-312-x86_64-linux-gnu.so: CMakeFiles/simd_kernels.dir/link.txt
 	@$(CMAKE_COMMAND) -E cmake_echo_color "--switch=$(COLOR)" --green --bold --progress-dir=/workspaces/SIMD-Microkernels-for-ML-Workloads/build/CMakeFiles --progress-num=$(CMAKE_PROGRESS_2) "Linking CXX shared module simd_kernels.cpython-312-x86_64-linux-gnu.so"
 	$(CMAKE_COMMAND) -E cmake_link_script CMakeFiles/simd_kernels.dir/link.txt --verbose=$(VERBOSE)

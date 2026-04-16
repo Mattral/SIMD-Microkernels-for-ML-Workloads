@@ -1,1 +1,1 @@
-/usr/bin/c++ -fPIC -O3 -DNDEBUG -flto=auto -shared  -o simd_kernels.cpython-312-x86_64-linux-gnu.so CMakeFiles/simd_kernels.dir/src/bindings/pybind_entry.cpp.o  libsimd_kernels_lib.a 
+/usr/bin/c++ -fPIC -O3 -DNDEBUG -flto=auto -shared  -o simd_kernels.cpython-312-x86_64-linux-gnu.so CMakeFiles/simd_kernels.dir/src/bindings/pybind_entry.cpp.o  libsimd_kernels_lib.a /usr/lib/gcc/x86_64-linux-gnu/13/libgomp.so /usr/lib/x86_64-linux-gnu/libpthread.a 
