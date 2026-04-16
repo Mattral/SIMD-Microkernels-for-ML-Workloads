@@ -93,6 +93,8 @@ bench_EXTERNAL_OBJECTS =
 bench: CMakeFiles/bench.dir/src/main_bench.cpp.o
 bench: CMakeFiles/bench.dir/build.make
 bench: libsimd_kernels_lib.a
+bench: /usr/lib/gcc/x86_64-linux-gnu/13/libgomp.so
+bench: /usr/lib/x86_64-linux-gnu/libpthread.a
 bench: CMakeFiles/bench.dir/link.txt
 	@$(CMAKE_COMMAND) -E cmake_echo_color "--switch=$(COLOR)" --green --bold --progress-dir=/workspaces/SIMD-Microkernels-for-ML-Workloads/build/CMakeFiles --progress-num=$(CMAKE_PROGRESS_2) "Linking CXX executable bench"
 	$(CMAKE_COMMAND) -E cmake_link_script CMakeFiles/bench.dir/link.txt --verbose=$(VERBOSE)

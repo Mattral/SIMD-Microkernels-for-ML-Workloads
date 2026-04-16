@@ -975,6 +975,7 @@ CMakeFiles/simd_kernels_lib.dir/src/kernels/avx_matmul.cpp.o: /workspaces/SIMD-M
   /usr/lib/gcc/x86_64-linux-gnu/13/include/movdirintrin.h \
   /usr/lib/gcc/x86_64-linux-gnu/13/include/mwaitintrin.h \
   /usr/lib/gcc/x86_64-linux-gnu/13/include/mwaitxintrin.h \
+  /usr/lib/gcc/x86_64-linux-gnu/13/include/omp.h \
   /usr/lib/gcc/x86_64-linux-gnu/13/include/pconfigintrin.h \
   /usr/lib/gcc/x86_64-linux-gnu/13/include/pkuintrin.h \
   /usr/lib/gcc/x86_64-linux-gnu/13/include/pmmintrin.h \
@@ -1281,6 +1282,7 @@ CMakeFiles/simd_kernels_lib.dir/src/kernels/gemm/avx2_gemm_packed.cpp.o: /worksp
   /usr/lib/gcc/x86_64-linux-gnu/13/include/movdirintrin.h \
   /usr/lib/gcc/x86_64-linux-gnu/13/include/mwaitintrin.h \
   /usr/lib/gcc/x86_64-linux-gnu/13/include/mwaitxintrin.h \
+  /usr/lib/gcc/x86_64-linux-gnu/13/include/omp.h \
   /usr/lib/gcc/x86_64-linux-gnu/13/include/pconfigintrin.h \
   /usr/lib/gcc/x86_64-linux-gnu/13/include/pkuintrin.h \
   /usr/lib/gcc/x86_64-linux-gnu/13/include/pmmintrin.h \
@@ -1783,6 +1785,8 @@ CMakeFiles/simd_kernels_lib.dir/src/kernels/intrinsic_gelu.cpp.o: /workspaces/SI
 /workspaces/SIMD-Microkernels-for-ML-Workloads/src/kernels/gemm/avx2_gemm_packed.cpp:
 
 /workspaces/SIMD-Microkernels-for-ML-Workloads/src/kernels/avx_matmul.hpp:
+
+/usr/lib/gcc/x86_64-linux-gnu/13/include/omp.h:
 
 /workspaces/SIMD-Microkernels-for-ML-Workloads/src/kernels/avx_matmul.cpp:
 

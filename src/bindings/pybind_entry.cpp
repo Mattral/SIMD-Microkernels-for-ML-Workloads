@@ -90,18 +90,15 @@ static void validate_array(const py::array& arr, const char* name) {
  *   alpha : float scalar (default 1.0)
  *   beta  : float scalar for C scaling (default 0.0 = overwrite)
  */
-static void py_sgemm(py::array A,
-                     py::array B,
-                     py::array C,
-                     float alpha = 1.0f,
-                     float beta  = 0.0f) {
+static py::array_t<float> py_sgemm(py::array A,
+                                      py::array B,
+                                      py::object C = py::none(),
+                                      float alpha = 1.0f,
+                                      float beta  = 0.0f) {
     validate_array(A, "A");
     validate_array(B, "B");
-    validate_array(C, "C");
-
     if (A.ndim() != 2) throw std::runtime_error("A must be 2-D");
     if (B.ndim() != 2) throw std::runtime_error("B must be 2-D");
-    if (C.ndim() != 2) throw std::runtime_error("C must be 2-D");
 
     int M = static_cast<int>(A.shape(0));
     int K = static_cast<int>(A.shape(1));
@@ -109,19 +106,26 @@ static void py_sgemm(py::array A,
 
     if (B.shape(0) != K)
         throw std::invalid_argument("A.shape[1] must equal B.shape[0]");
-    if (C.shape(0) != M || C.shape(1) != N)
-        throw std::runtime_error("C must have shape [M, N]");
+
+    py::array_t<float> out;
+    if (C.is_none()) {
+        out = py::array_t<float>({M, N});
+    } else {
+        py::array c_arr = C.cast<py::array>();
+        validate_array(c_arr, "C");
+        if (c_arr.ndim() != 2) throw std::runtime_error("C must be 2-D");
+        if (c_arr.shape(0) != M || c_arr.shape(1) != N)
+            throw std::runtime_error("C must have shape [M, N]");
+        out = c_arr;
+    }
 
     bool A_is_aligned = is_aligned(A.data(), 32);
     bool B_is_aligned = is_aligned(B.data(), 32);
-    bool C_is_aligned = is_aligned(C.mutable_data(), 32);
-    if (!A_is_aligned || !B_is_aligned || !C_is_aligned) {
-        // Fall back to unaligned-safe kernels. The inner AVX2 path uses
-        // _mm256_loadu_ps/_mm256_storeu_ps where needed, so misaligned
-        // NumPy buffers do not crash with SIGBUS.
-    }
+    bool C_is_aligned = is_aligned(out.mutable_data(), 32);
+    (void)A_is_aligned;
+    (void)B_is_aligned;
+    (void)C_is_aligned;
 
-    // Release GIL during the (potentially long) GEMM computation
     {
         py::gil_scoped_release release;
         simd_ml::dispatch::sgemm(M, N, K,
@@ -129,8 +133,9 @@ static void py_sgemm(py::array A,
                                  static_cast<const float*>(A.data()), K,
                                  static_cast<const float*>(B.data()), N,
                                  beta,
-                                 static_cast<float*>(C.mutable_data()), N);
+                                 static_cast<float*>(out.mutable_data()), N);
     }
+    return out;
 }
 
 // ─── Binding: gelu_inplace ────────────────────────────────────────────────────
@@ -246,21 +251,23 @@ static int py_get_num_threads() {
 }
 
 // ─── Binding: build_info ──────────────────────────────────────────────────────
-static std::string build_info() {
-    std::string info = "SIMD-ML-Microkernels build info:\n";
+static py::dict build_info() {
+    py::dict info;
 #ifdef __AVX512F__
-    info += "  ISA:         AVX-512F + AVX-512DQ\n";
+    info["isa"] = "AVX-512F + AVX-512DQ";
 #elif defined(__AVX2__)
-    info += "  ISA:         AVX2 + FMA3\n";
+    info["isa"] = "AVX2 + FMA3";
 #else
-    info += "  ISA:         Scalar fallback (no AVX2 detected)\n";
+    info["isa"] = "Scalar fallback (no AVX2 detected)";
 #endif
 #ifdef __FMA__
-    info += "  FMA:         enabled (_mm256_fmadd_ps)\n";
+    info["fma"] = true;
+#else
+    info["fma"] = false;
 #endif
-    info += "  Alignment:   64-byte (posix_memalign / _aligned_malloc)\n";
-    info += "  Build:       " __DATE__ " " __TIME__ "\n";
-    info += "  Runtime ISA: " + std::string(simd_ml::dispatch::detected_isa()) + "\n";
+    info["alignment"] = "64-byte (posix_memalign / _aligned_malloc)";
+    info["build_timestamp"] = std::string(__DATE__) + " " + std::string(__TIME__);
+    info["runtime_isa"] = simd_ml::dispatch::detected_isa();
     return info;
 }
 

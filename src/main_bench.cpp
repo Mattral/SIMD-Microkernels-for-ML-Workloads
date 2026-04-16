@@ -432,7 +432,9 @@ static void print_roofline_summary() {
     printf("\n  Performance Matrix:\n");
     printf("  %-16s %-22s %-22s %-10s\n",
            "Matrix Size", "Scalar -O3 (MCycles)", "SIMD AVX2 (MCycles)", "Speedup");
-    printint argc, char** argv) {
+}
+
+int main(int argc, char** argv) {
     std::string json_output;
     int warmup = 3;
     int reps = 10;

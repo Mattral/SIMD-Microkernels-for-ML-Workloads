@@ -205,7 +205,7 @@ OpenMP_gomp_LIBRARY:FILEPATH=/usr/lib/gcc/x86_64-linux-gnu/13/libgomp.so
 OpenMP_pthread_LIBRARY:FILEPATH=/usr/lib/x86_64-linux-gnu/libpthread.a
 
 //Enable OpenMP multithreading in GEMM
-SIMD_ML_OPENMP:BOOL=OFF
+SIMD_ML_OPENMP:BOOL=ON
 
 //The directory containing a CMake configuration file for pybind11.
 pybind11_DIR:PATH=/home/codespace/.python/current/lib/python3.12/site-packages/pybind11/share/cmake/pybind11
