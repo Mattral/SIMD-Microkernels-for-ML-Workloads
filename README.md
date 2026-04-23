@@ -2,10 +2,19 @@
 
 > Hand-rolled SIMD microkernels for ML primitives — AVX2 GEMM, vectorized GeLU, Python bindings, and cycle-accurate benchmarks. Built from first principles to understand what happens *below* the BLAS layer.
 
-[![CI](https://github.com/Mattral/SIMD-Microkernels-for-ML-Workloads/actions/workflows/ci.yml/badge.svg)](https://github.com/Mattral/SIMD-Microkernels-for-ML-Workloads/actions)
-[![License: Apache 2.0](https://img.shields.io/badge/License-Apache_2.0-blue.svg)](LICENSE)
-[![C++17](https://img.shields.io/badge/C++-17-informational?logo=cplusplus)](CMakeLists.txt)
-[![Python 3.8+](https://img.shields.io/badge/Python-3.8+-informational?logo=python)](pyproject.toml)
+<p align="center">
+  <a href="https://github.com/Mattral/SIMD-Microkernels-for-ML-Workloads/actions/workflows/ci.yml">
+    <img alt="CI" src="https://img.shields.io/github/actions/workflow/status/Mattral/SIMD-Microkernels-for-ML-Workloads/ci.yml?branch=main&label=CI&style=for-the-badge&logo=github">
+  </a>
+  <a href="./LICENSE">
+    <img alt="License" src="https://img.shields.io/badge/license-Apache--2.0-blue.svg?style=for-the-badge">
+  </a>
+  <img alt="C++17" src="https://img.shields.io/badge/C++-17-informational?logo=cplusplus&style=for-the-badge">
+  <img alt="Python 3.8+" src="https://img.shields.io/badge/Python-3.8+-informational?logo=python&style=for-the-badge">
+  <a href="https://doi.org/10.5281/zenodo.20616502">
+    <img alt="DOI" src="https://img.shields.io/badge/DOI-10.5281%2Fzenodo.20616502-7C3AED?style=for-the-badge&logo=zenodo&logoColor=white">
+  </a>
+</p>
 
 ---
 
