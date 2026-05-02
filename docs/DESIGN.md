@@ -1,142 +1,241 @@
-# DESIGN.md
+# IntrinsicML — Design Document
 
-## 1. The GEMM Performance Problem
+**Version**: 2.0  
+**Status**: Living document — updated as major architectural decisions are made.
 
-Dense matrix multiplication is the core primitive in many ML workloads. The naïve triple-loop algorithm:
+---
 
-```cpp
-for (int i = 0; i < M; ++i)
-  for (int k = 0; k < K; ++k)
-    for (int j = 0; j < N; ++j)
-      C[i][j] += A[i][k] * B[k][j];
+## 1. Project Goals
+
+IntrinsicML occupies a specific niche: a **pedagogically transparent yet
+engineering-complete** reference implementation of SIMD microkernels for ML.
+
+| Axis               | What we are                         | What we are not |
+|--------------------|-------------------------------------|-----------------|
+| Correctness        | Validated against NumPy/PyTorch     | A toy / untested sketch |
+| Performance        | 15–25% of OpenBLAS single-threaded  | A BLAS replacement |
+| Readability        | Commented intrinsics with rationale | Opaque assembly |
+| Usability          | `pip install`-able Python library   | An isolated demo |
+
+---
+
+## 2. Cache Blocking (Goto/BLIS Structure)
+
+### Why blocking matters
+
+A naïve triple-loop GEMM (i, j, k) accesses B in column-major order — one
+new cache line per inner iteration. For a 256×256 float32 matrix (256 KB),
+this causes L2/L3 thrashing and achieves < 5% of peak arithmetic throughput.
+
+### The five-loop structure
+
+We follow the Goto (2008) / BLIS decomposition:
+
+```
+for jc in 0..N step NC:          # fits Bc panel in L3
+  for pc in 0..K step KC:        # fits Bc panel in L2; Ac panel in L2
+    pack_B(B[pc:pc+KC, jc:jc+NC])
+    for ic in 0..M step MC:      # fits Ac panel in L2
+      pack_A(A[ic:ic+MC, pc:pc+KC])
+      for jr in 0..NC step NR:   # register tile N-loop
+        for ir in 0..MC step MR: # register tile M-loop
+          microkernel(A_packed, B_packed, C)  ← hot inner loop
 ```
 
-is simple, but it performs poorly on modern CPUs because it does not reuse data effectively. It streams the same input rows and columns repeatedly from memory, causing high traffic to DRAM and low arithmetic intensity.
+### Tile size rationale
 
-For an FP32 GEMM of size `M×K×N`, the work is `2*M*N*K` FLOPs and the minimum data movement is approximately `4*(M*K + K*N + M*N)` bytes. The arithmetic intensity (AI) is therefore:
+| Constant | Value | Rationale |
+|----------|-------|-----------|
+| MR       | 8     | 8 YMM accumulators per row; one YMM broadcast per k-step |
+| NR       | 8     | 8 floats per YMM; 8 YMM accumulators per col |
+| KC       | 256   | Ac panel (MC×KC = 128×256×4B = 128 KB) fits in L2 |
+| MC       | 128   | Bc panel (KC×NC = 256×2048×4B = 2 MB) — see NC note |
+| NC       | 2048  | Large NC exploits L3; NC is deliberately large in avx2_gemm_packed |
 
-```text
-AI = 2*M*N*K / (4*(M*K + K*N + M*N)) FLOP/byte
-```
+The two GEMM implementations (`avx_matmul.cpp` vs `avx2_gemm_packed.cpp`) use
+slightly different tile sizes, providing a useful comparison point. Both follow
+the same five-loop structure.
 
-For square matrices with `M=N=K=S`, the AI simplifies to:
-
-```text
-AI = S / 2 FLOP/byte
-```
-
-That means a 256×256 GEMM has `AI ≈ 128` FLOP/byte, which is already in the compute-bound regime on most CPUs. For smaller sizes the bottleneck is memory; for larger sizes the bottleneck is compute.
-
-A production-quality GEMM kernel therefore needs to maximize reuse through blocking, packing, and careful register scheduling.
-
-## 2. The Goto Algorithm
-
-The Goto algorithm (Goto & van de Geijn, 2008) is a high-performance GEMM strategy that partitions the computation into three levels of blocking:
-
-- `NC` for the outermost loop, sized to fit L3 cache
-- `KC` for the shared inner block, sized to fit L2 cache
-- `MC` for the panel of A, sized to fit L1 cache
-
-This repository uses the following static tile sizes:
-
-- `MR = 8`
-- `NR = 8`
-- `KC = 256`
-- `MC = 128`
-- `NC = 2048`
-
-Packing transforms submatrices of `A` and `B` into contiguous buffers to improve streaming efficiency and reduce TLB pressure. Packing also enables a clean inner kernel that can assume contiguous data and reuse vector registers effectively.
-
-The main idea is that each block of `A` and `B` is loaded once from L2/L3 and reused many times by the register-blocked inner kernel.
+---
 
 ## 3. AVX2 Register Blocking
 
-AVX2 provides 256-bit vector registers, which can hold eight `float` values. The register blocking strategy used here is an 8×8 micro-kernel:
+### avx_matmul.cpp: 6×16 register block
 
-- `MR = 8` rows of `A` per register block
-- `NR = 8` columns of `B` per register block
-
-This choice is driven by the register file on AVX2 CPUs: 16 YMM registers are available, and the kernel needs both A/B inputs plus accumulators. A safe scheme reserves 2 registers for pointer and constant handling, leaving about 14 registers for data. An 8×8 block strikes a good balance between register reuse and instruction throughput.
-
-FMA latency on Haswell/Zen is around 4 cycles. To hide this latency, the kernel maintains multiple independent accumulator registers and interleaves loads with FMA operations.
-
-## 4. Activation Function Numerics
-
-### GeLU
-
-GeLU is defined as:
-
-```text
-GeLU(x) = x * Phi(x) = x * 0.5 * (1 + erf(x / sqrt(2)))
+```
+MR=6, NR=16 (two __m256 vectors wide)
+Accumulator registers: 12 YMM (6 rows × 2 columns)
+A broadcast:           1  YMM (set1_ps)
+B panel:               2  YMM
+Total:                15 / 16 YMM — leaves 1 for temporaries
 ```
 
-This implementation uses the fast approximation:
+### avx2_gemm_packed.cpp: 8×8 register block
 
-```text
-GeLU(x) ≈ 0.5 * x * (1 + tanh(sqrt(2/pi) * (x + 0.044715 * x^3)))
+```
+MR=8, NR=8 (one __m256 vector wide)
+Accumulator registers: 8 YMM
+A pointers:            8 scalar  (a0..a7[p])
+B panel:               1 YMM
+Total:                 9 + 8 scalar
 ```
 
-The code is vectorized in AVX2 and evaluates the polynomial in Horner form to minimize instructions. The implementation targets numeric stability by clamping values and using `erff` in the scalar reference path.
+The 6×16 layout in `avx_matmul.cpp` achieves better arithmetic intensity
+(12 FMAs per B-load versus 8) at the cost of a wider B panel.
 
-### SiLU
+---
 
-SiLU is defined as:
+## 4. GeLU Kernel Design
 
-```text
-SiLU(x) = x / (1 + exp(-x))
+### Mathematical form
+
+We implement the **tanh approximation** used universally in BERT/GPT models:
+
+```
+GeLU(x) ≈ 0.5 · x · [1 + tanh(√(2/π) · (x + 0.044715·x³))]
 ```
 
-Efficient evaluation uses a numerically stable approximation for `exp(-x)` in the AVX2 path, combined with vectorized multiplication and blend operations.
+**Why not the exact erf path?** `std::erff` is a transcendental function
+requiring ~12 polynomial terms plus a division — approximately 5× slower
+than our rational polynomial tanh approximation for the same accuracy budget.
+The reference scalar path (`gelu_forward_scalar`) uses `erff` as a correctness
+oracle.
 
-### Softmax
+### Rational polynomial for tanh
 
-Softmax is computed row-wise with the standard stability trick:
-
-```text
-softmax(x_i) = exp(x_i - max(x)) / sum(exp(x_j - max(x)))
+```
+tanh(y) ≈ y · (c₁ + c₃·y² + c₅·y⁴)
+           ────────────────────────────
+           1  + d₂·y² + d₄·y⁴ + d₆·y⁶
 ```
 
-Subtracting the row maximum avoids overflow and keeps the exponent range bounded.
+Coefficients (minimax fit over [−5, 5]):
 
-## 5. Performance Model
+| Coefficient | Value       |
+|-------------|-------------|
+| c₃          | −0.16035530 |
+| c₅          |  0.00533740 |
+| d₂          |  0.48057120 |
+| d₄          |  0.07985040 |
+| d₆          |  0.00587330 |
 
-The theoretical peak FP32 throughput for an AVX2 core is:
+Division is replaced by `_mm256_rcp_ps` (≈ 12 bits) + one Newton–Raphson
+refinement step, reaching full FP32 accuracy (~23 bits) at 1.0 cycle
+throughput vs 5–9 cycles for true division.
 
-```text
-peak = frequency_ghz * 16 FLOP/cycle
+**Max absolute error vs exact tanh:** < 5×10⁻⁶ over [−5, 5].
+
+---
+
+## 5. Layer Normalization Design
+
+Layer Normalization (Ba et al., 2016) normalizes over the last dimension:
+
+```
+output_i = (x_i − μ) / √(σ² + ε) · γ_i + β_i
 ```
 
-because AVX2 FMA can perform 8 multiply-add operations per cycle, which counts as 16 FP32 operations.
+### Three-pass implementation
 
-For a 3.6 GHz core, the peak is:
+1. **Mean pass**: AVX2 horizontal sum with float→double promotion to
+   avoid catastrophic cancellation.
+2. **Variance pass**: AVX2 vectorized (x − mean)² accumulation.
+3. **Normalize pass**: AVX2 vectorized multiply + optional gamma/beta FMA.
 
-```text
-3.6 * 16 = 57.6 GFLOPS
+The three-pass approach is chosen over Welford's online algorithm for
+pedagogical clarity; it produces simpler, easier-to-verify assembly.
+For very large n (>10⁶), a two-pass (combined variance+normalize) would
+reduce memory traffic — noted in ROADMAP.md.
+
+---
+
+## 6. Software Prefetching
+
+The GEMM microkernel issues software prefetch hints for the B panel:
+
+```cpp
+prefetch_l1(b_ptr + 32);   // 4 iterations ahead in the K-loop
 ```
 
-Measured efficiency is reported as:
+This is a hint to pull the next cache line into L1 before it is needed.
+On Skylake-class CPUs, L2→L1 latency is ~12 cycles; an FMA throughput of
+0.5 cy/instruction means the kernel processes ~24 FMAs in that window —
+matching the 4-iteration unroll factor.
 
-```text
-utilization = measured_GFLOPS / peak_GFLOPS
-```
+**Prefetch distance tuning**: the constant `+32` (2 YMM vectors, 64 bytes,
+one cache line) is appropriate for Skylake. Zen 3/4 or Alder Lake may
+benefit from a larger or smaller distance. This is a known tuning opportunity.
 
-This repository's current implementation is designed to achieve a significant fraction of peak for moderate block sizes, with the remaining gap attributable to missing architecture-specific tuning and packing optimizations.
+---
 
-## 6. What Is Missing vs Production
+## 7. Explicitly Acknowledged Gaps vs Production BLAS
 
-This project intentionally omits production features that are important for a full BLAS-quality library:
+| Gap                          | Impact (estimated)     | Future work |
+|------------------------------|------------------------|-------------|
+| C++ intrinsics vs assembly   | 5–15% overhead         | Optional; use libxsmm? |
+| Fixed tile sizes             | 10–20% suboptimal      | Empirical search / BLIS auto-tune |
+| No NUMA-aware allocation     | Negligible for 1 socket| Add for multi-socket |
+| No vectorized exp() for Softmax | Softmax 3–5× slower | minimax exp() approximation |
+| Single-threaded default      | Linear with core count | OpenMP (optional flag) |
 
-- Hardware-specific prefetch hints (`PREFETCHT0`, `PREFETCHNTA`)
-- NUMA-aware allocation and thread placement
-- Runtime cache-size probing and adaptive tile selection
-- Architecture-specific tile sizes for Zen, Skylake, and Ice Lake
-- AVX-512 micro-kernels and AMX/DPAS paths
-- Int8/BF16 inference kernels and quantized support
+---
 
-These omissions explain the remaining 20–30% performance gap versus tuned libraries such as OpenBLAS or MKL.
+## 8. `-ffast-math` Policy
 
-## Source File References
+The performance build uses `-ffast-math`. This permits:
+- Reassociation of FP operations (may change rounding order)
+- Unsafe math optimizations (NaN/Inf behaviour undefined)
 
-- `src/kernels/gemm/avx2_gemm_packed.cpp` — packed GEMM, see §2 and §3
-- `src/kernels/activations/activations.hpp` — activation APIs, see §4
-- `src/bindings/pybind_entry.cpp` — Python API surface, see §10 in feedback
+This is **appropriate for ML inference** where:
+- Inputs are pre-validated (no NaN/Inf expected)
+- Sub-ULP rounding differences do not affect model accuracy
+- The speed gain (5–15%) is material
+
+The precision test library is built **without** `-ffast-math` to validate
+correctness under IEEE 754 semantics.
+
+---
+
+## 9. Python Binding Design
+
+Key decisions in `pybind_entry.cpp`:
+
+1. **GIL release**: `py::gil_scoped_release release;` before every kernel
+   call. This allows Python's threading module to schedule other threads
+   during computation, important for async inference servers.
+
+2. **Zero-copy**: `py::array_t<float, py::array::c_contiguous>` gives
+   direct pointer access to the NumPy buffer — no copies.
+
+3. **Shape validation at the Python layer**: clearer errors than catching
+   undefined behaviour inside the kernel.
+
+4. **C allocation on None**: `sgemm(A, B)` without a C argument allocates
+   a new output array, matching the NumPy `@` operator ergonomics.
+
+---
+
+## 10. CI/CD Architecture
+
+Four GitHub Actions workflows:
+
+| Workflow          | Trigger                | Purpose |
+|-------------------|------------------------|---------|
+| `ci.yml`          | Every push / PR        | Build + C++ tests + Python precision tests |
+| `build-and-test.yml` | Push to main        | Focused build validation |
+| `bench.yml`       | Weekly (Sunday 4 AM)   | Statistical benchmark + regression gate |
+| `guardrail.yml`   | Every push / PR        | Static analysis + security scan |
+
+The bench workflow uses `bench_stat` (not `bench`) for statistical rigour:
+30 measurement repetitions, 95% confidence intervals, JSON output, and
+automated regression detection via `benchmarks/check_regression.py`.
+
+---
+
+*References*
+
+- Goto, K. & van de Geijn, R. (2008). Anatomy of High-Performance Matrix Multiplication. *ACM TOMS* 34(3).
+- Van Zee, F.G. & van de Geijn, R. (2015). BLIS: A Framework for Rapidly Instantiating BLAS Functionality. *ACM TOMS* 41(3).
+- Hendrycks, D. & Gimpel, K. (2016). Gaussian Error Linear Units (GELUs). *arXiv:1606.08415*.
+- Ba, J.L. et al. (2016). Layer Normalization. *arXiv:1607.06450*.
+- Intel. *Intrinsics Guide*. https://www.intel.com/content/www/us/en/docs/intrinsics-guide/

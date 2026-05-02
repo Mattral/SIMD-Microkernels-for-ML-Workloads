@@ -1,8 +1,22 @@
-// Runtime kernel dispatcher for GEMM and simple activations.
-// See feedback.md BLOCK 2 for design and tests.
+/**
+ * gemm_dispatcher.cpp — Runtime Kernel Dispatcher
+ *
+ * Detects CPU features at startup (once, via std::call_once) and populates
+ * the KernelRegistry with the best available implementations.
+ *
+ * Decision tree:
+ *   AVX-512F+DQ → falls back to AVX2 (AVX-512 GEMM is available but the
+ *                  avx2_gemm_packed kernel is currently more complete)
+ *   AVX2 + FMA  → simd_ml::gemm::sgemm_packed + activations::gelu_avx2
+ *   SSE4.2      → naive scalar GEMM (SSE GEMM not yet implemented)
+ *   fallback    → naive scalar GEMM
+ *
+ * This file also implements CpuFeatures::detect() via inline CPUID.
+ */
 
 #include "../../dispatch/cpuid.hpp"
 #include "../../dispatch/kernel_registry.hpp"
+#include "../../kernels/activations/activations.hpp"
 #include "naive_gemm.hpp"
 #include "avx2_gemm_packed.hpp"
 
@@ -13,72 +27,61 @@ namespace {
     static simd_ml::dispatch::KernelRegistry g_registry;
 }
 
-// Implement CpuFeatures::detect()
+// CpuFeatures::detect() implementation
 namespace simd_ml { namespace dispatch {
 
-inline void cpuid(int leaf, int subleaf, unsigned int& a, unsigned int& b, unsigned int& c, unsigned int& d) {
-#if defined(__GNUC__) || defined(__clang__)
-    __builtin_cpu_init();
+static void cpuid_ex(int leaf, int subleaf,
+                     unsigned int& a, unsigned int& b,
+                     unsigned int& c, unsigned int& d) {
     a = b = c = d = 0;
-    unsigned int aa=0, bb=0, cc=0, dd=0;
+#if defined(__GNUC__) || defined(__clang__)
 #if defined(__x86_64__) || defined(__i386__)
     __asm__ volatile("cpuid"
-                     : "=a"(aa), "=b"(bb), "=c"(cc), "=d"(dd)
+                     : "=a"(a), "=b"(b), "=c"(c), "=d"(d)
                      : "a"(leaf), "c"(subleaf));
-    a = aa; b = bb; c = cc; d = dd;
 #endif
-#else
-    a=b=c=d=0;
 #endif
 }
 
 CpuFeatures CpuFeatures::detect() noexcept {
     CpuFeatures f;
 #if defined(__x86_64__) || defined(__i386__)
-    unsigned int a,b,c,d;
-    // leaf 1: feature bits in ECX/EDX
-    cpuid(1, 0, a,b,c,d);
-    f.has_fma = (c & (1u << 12)) != 0;
+    unsigned int a, b, c, d;
+    // Leaf 1: SSE4.2 (ECX bit 20), FMA (ECX bit 12)
+    cpuid_ex(1, 0, a, b, c, d);
+    f.has_fma   = (c & (1u << 12)) != 0;
     f.has_sse42 = (c & (1u << 20)) != 0;
-
-    // leaf 7 subleaf 0 for extended features (EBX)
-    cpuid(7, 0, a,b,c,d);
-    f.has_avx2 = (b & (1u << 5)) != 0;
+    // Leaf 7, sub-leaf 0: AVX2 (EBX bit 5), AVX-512F (EBX bit 16), AVX-512DQ (EBX bit 17)
+    cpuid_ex(7, 0, a, b, c, d);
+    f.has_avx2    = (b & (1u << 5))  != 0;
     f.has_avx512f = (b & (1u << 16)) != 0;
-    f.has_avx512dq = (b & (1u << 17)) != 0;
+    f.has_avx512dq= (b & (1u << 17)) != 0;
 #endif
     return f;
 }
 
-} }
+} } // namespace simd_ml::dispatch
 
 namespace simd_ml { namespace dispatch {
 
 const KernelRegistry& get_kernels() noexcept {
-    std::call_once(g_registry_once, []{
+    std::call_once(g_registry_once, [] {
         CpuFeatures f = CpuFeatures::detect();
-        if (f.has_avx512f && f.has_avx512dq) {
-            // AVX-512 path not implemented yet; fall back to AVX2 if available
-            if (f.has_avx2 && f.has_fma) {
-                g_registry.sgemm = &gemm::sgemm_packed;
-                g_registry.gelu = &activations::gelu_avx2;
-                g_registry.isa_label = "avx2";
-            } else {
-                g_registry.sgemm = &gemm_ref::naive_sgemm;
-                g_registry.gelu = nullptr;
-                g_registry.isa_label = "scalar";
-            }
-        } else if (f.has_avx2 && f.has_fma) {
-            g_registry.sgemm = &gemm::sgemm_packed;
-            g_registry.gelu = &activations::gelu_avx2;
-            g_registry.isa_label = "avx2";
+
+        // Note: even when AVX-512 is available, we currently use the AVX2
+        // packed GEMM as it has a more complete 5-loop implementation.
+        // The avx_matmul.cpp AVX-512 path dispatches internally at runtime.
+        if (f.has_avx2 && f.has_fma) {
+            g_registry.sgemm     = &gemm::sgemm_packed;
+            g_registry.gelu      = &activations::gelu_avx2;  // global namespace
+            g_registry.isa_label = f.has_avx512f ? "avx512_host_avx2_kernel" : "avx2";
         } else if (f.has_sse42) {
-            g_registry.sgemm = &gemm_ref::naive_sgemm; // SSE path not implemented
-            g_registry.gelu = nullptr;
+            g_registry.sgemm     = &gemm_ref::naive_sgemm;
+            g_registry.gelu      = nullptr;
             g_registry.isa_label = "sse42";
         } else {
-            g_registry.sgemm = &gemm_ref::naive_sgemm;
-            g_registry.gelu = nullptr;
+            g_registry.sgemm     = &gemm_ref::naive_sgemm;
+            g_registry.gelu      = nullptr;
             g_registry.isa_label = "scalar";
         }
     });
@@ -91,7 +94,7 @@ void sgemm(int M, int N, int K,
            float beta, float* C, int ldc) {
     const KernelRegistry& reg = get_kernels();
     if (reg.sgemm) {
-        reg.sgemm(M,N,K,alpha,A,lda,B,ldb,beta,C,ldc);
+        reg.sgemm(M, N, K, alpha, A, lda, B, ldb, beta, C, ldc);
     }
 }
 
@@ -99,4 +102,4 @@ const char* detected_isa() noexcept {
     return get_kernels().isa_label;
 }
 
-} }
+} } // namespace simd_ml::dispatch
