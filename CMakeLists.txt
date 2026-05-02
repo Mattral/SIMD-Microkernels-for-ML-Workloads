@@ -10,8 +10,10 @@ find_package(Python3 REQUIRED COMPONENTS Interpreter Development)
 find_package(pybind11)
 find_package(OpenMP OPTIONAL_COMPONENTS CXX)
 option(SIMD_ML_OPENMP "Enable OpenMP multithreading in GEMM" OFF)
+option(BENCH_OPENBLAS "Link against OpenBLAS for baseline comparison" OFF)
+option(SIMD_ML_SANITIZE "Enable AddressSanitizer/UndefinedBehaviorSanitizer for test binaries" OFF)
 
-# ─── Detect AVX support ──────────────────────────────────────────────────────
+# ─── Detect AVX support ───────────────────────────────────────────────────────
 include(CheckCXXCompilerFlag)
 check_cxx_compiler_flag("-mavx512f" COMPILER_HAS_AVX512F)
 check_cxx_compiler_flag("-mavx2"    COMPILER_HAS_AVX2)
@@ -49,6 +51,7 @@ add_library(simd_kernels_lib STATIC
     src/kernels/activations/relu_avx2.cpp
     src/kernels/activations/silu_avx2.cpp
     src/kernels/activations/softmax_avx2.cpp
+    src/kernels/activations/layer_norm_avx2.cpp
     src/kernels/gemm/gemm_dispatcher.cpp
 )
 target_include_directories(simd_kernels_lib PUBLIC src ${CMAKE_SOURCE_DIR}/src/kernels)
@@ -81,6 +84,26 @@ add_executable(bench
 target_link_libraries(bench PRIVATE simd_kernels_lib)
 target_include_directories(bench PRIVATE src)
 target_compile_options(bench PRIVATE ${PERF_FLAGS})
+
+# Optional OpenBLAS linkage for baseline comparisons
+if(BENCH_OPENBLAS)
+    find_package(BLAS QUIET)
+    if(BLAS_FOUND)
+        target_link_libraries(bench PRIVATE ${BLAS_LIBRARIES})
+        target_compile_definitions(bench PRIVATE BENCH_WITH_OPENBLAS)
+        message(STATUS "OpenBLAS found; baseline comparison enabled in bench")
+    else()
+        message(WARNING "BENCH_OPENBLAS=ON but BLAS not found; disabling")
+    endif()
+endif()
+
+# ─── Statistical benchmark tool (extended harness) ──────────────────────────
+add_executable(bench_stat
+    src/bench_stat.cpp
+)
+target_link_libraries(bench_stat PRIVATE simd_kernels_lib)
+target_include_directories(bench_stat PRIVATE src)
+target_compile_options(bench_stat PRIVATE ${PERF_FLAGS})
 
 # ─── Tests ───────────────────────────────────────────────────────────────────
 enable_testing()
