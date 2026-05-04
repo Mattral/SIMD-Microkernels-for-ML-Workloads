@@ -10,26 +10,48 @@ build-backend = "scikit_build_core.build"
 # ─── Project metadata ──────────────────────────────────────────────────────────
 [project]
 name            = "simd-ml-microkernels"
-version         = "0.1.0"
-description     = "Hand-vectorized AVX2/AVX-512 GEMM and GeLU microkernels with Python bindings"
+version         = "0.2.0"
+description     = "Hand-vectorized AVX2 GEMM and ML activation microkernels with Python bindings"
 readme          = "README.md"
 license         = { file = "LICENSE" }
 requires-python = ">=3.9"
 dependencies    = ["numpy>=1.24"]
 
 [project.optional-dependencies]
-dev  = ["pytest", "torch"]
-bench = ["matplotlib", "tabulate"]
+# Minimum set for running the full test suite
+dev   = ["pytest>=7.4", "scipy>=1.11", "torch; extra == 'torch'"]
+# Additional tools for the Python benchmark with plots
+bench = ["matplotlib>=3.7", "tabulate>=0.9"]
+# Everything including optional extras
+all   = ["pytest>=7.4", "scipy>=1.11", "matplotlib>=3.7", "tabulate>=0.9"]
 
-# ─── scikit-build-core settings ───────────────────────────────────────────────
+[project.urls]
+Homepage   = "https://github.com/Mattral/SIMD-Microkernels-for-ML-Workloads"
+Preprint   = "https://zenodo.org/records/20616502"
+Issues     = "https://github.com/Mattral/SIMD-Microkernels-for-ML-Workloads/issues"
+
+# ─── scikit-build-core CMake settings ─────────────────────────────────────────
 [tool.scikit-build]
-cmake.build-type     = "Release"
-cmake.verbose        = false
-wheel.packages       = []          # C extension only, no Python package dir
+cmake.build-type = "Release"
+cmake.verbose    = false
+wheel.packages   = []     # C extension only — no Python package directory
 
-# ─── CMakeLists.txt is the build driver ───────────────────────────────────────
-# See CMakeLists.txt in root for full compiler flags.
-# Key flags applied there:
-#   -O3 -march=native -mfma -mavx2   (or -mavx512f when detected)
-#   -DNDEBUG
-#   -ffast-math  (acceptable for ML kernels; NaN/inf behaviour is undefined anyway)
+# ─── pytest configuration ─────────────────────────────────────────────────────
+[tool.pytest.ini_options]
+testpaths    = ["tests"]
+python_files = ["test_*.py"]
+python_classes = ["Test*"]
+python_functions = ["test_*"]
+addopts      = "--tb=short -q"
+# Mark slow tests so they can be skipped in quick CI:
+#   pytest -m "not slow"
+markers = [
+    "slow: marks tests as slow (deselect with -m 'not slow')",
+]
+
+# ─── Ruff linter (optional, used by guardrail.yml) ────────────────────────────
+[tool.ruff]
+line-length = 100
+target-version = "py39"
+select = ["E", "F", "W", "I", "UP"]
+ignore = ["E501"]   # line length handled separately
