@@ -1,10 +1,19 @@
 cff-version: "1.2.0"
-title: "IntrinsicML: SIMD Microkernels for ML Workloads"\nauthors:
+title: "IntrinsicML: Transparent Hand-Vectorized SIMD Microkernels for Machine Learning Workloads"
+authors:
   - family-names: "Myet"
     given-names: "Min Htet"
-version: "2.0.0"
-license: "MIT"
+version: "0.2.0"
+date-released: "2026-06-09"
+license: "Apache-2.0"
 repository-code: "https://github.com/Mattral/SIMD-Microkernels-for-ML-Workloads"
+url: "https://zenodo.org/records/20616502"
+abstract: >
+  An open-source C++17 library of clean, well-documented hand-vectorized
+  microkernels for GEMM and ML activation functions (GeLU, ReLU, SiLU,
+  Softmax, LayerNorm) targeting x86 processors with AVX2/FMA support.
+  Includes Python/NumPy bindings via pybind11, a statistical benchmark
+  harness, and a CI pipeline with performance regression gating.
 keywords:
   - simd
   - avx2
@@ -12,8 +21,15 @@ keywords:
   - gemm
   - machine-learning
   - microkernels
+  - gelu
+  - layer-normalization
+  - high-performance-computing
   - cpp
 preferred-citation:
-  type: software
-  title: "IntrinsicML"
-  doi: "TODO: add Zenodo DOI after publishing"
+  type: unpublished
+  title: "IntrinsicML: Transparent Hand-Vectorized SIMD Microkernels for Machine Learning Workloads"
+  authors:
+    - family-names: "Myet"
+      given-names: "Min Htet"
+  year: 2026
+  url: "https://zenodo.org/records/20616502"

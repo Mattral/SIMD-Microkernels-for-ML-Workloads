@@ -1,82 +1,122 @@
-# Setup
+# Setup Guide
+
+---
 
 ## Prerequisites
 
-Required packages on Linux:
+| Tool | Minimum version | Notes |
+|---|---|---|
+| CMake | 3.22 | Required for `FetchContent` + `CheckCXXCompilerFlag` |
+| GCC | 12+ | or Clang 15+; must support C++17 and AVX2 |
+| Python | 3.9+ | for the Python extension and tests |
+| pybind11 | 2.11+ | via `pip install pybind11[global]` |
+| Ninja | any | recommended for faster builds |
 
-* `cmake` (3.18+ recommended)
-* `gcc` or `clang` with AVX2/FMA support
-* `python3` and `pip`
-* `pybind11` headers (installed via package manager or pip)
-* `ninja` or `make` for build execution
-
-On Debian/Ubuntu:
-
-```bash
-sudo apt update
-sudo apt install build-essential cmake python3-dev python3-pip git
-pip install pybind11
-```
-
-## Build the C++ benchmark
+On Debian/Ubuntu 22.04+:
 
 ```bash
-mkdir -p build
-cd build
-cmake .. -DCMAKE_BUILD_TYPE=Release -DSIMD_ML_OPENMP=ON
-cmake --build . --parallel
+sudo apt-get update
+sudo apt-get install -y cmake ninja-build g++-12 python3-dev python3-pip
+pip install "pybind11[global]>=2.11" numpy scipy pytest
 ```
 
-Run the benchmark executable:
+---
+
+## C++ build (standalone bench and tests)
 
 ```bash
-./bench --json ../benchmarks/results/bench_results.json
+git clone https://github.com/Mattral/SIMD-Microkernels-for-ML-Workloads.git
+cd SIMD-Microkernels-for-ML-Workloads
+
+cmake -S . -B build -G Ninja -DCMAKE_BUILD_TYPE=Release
+cmake --build build --parallel
+
+# Cycle-accurate RDTSC benchmark
+./build/bench
+
+# Statistical benchmark (30-rep wall-clock, 95% CI, JSON output)
+./build/bench_stat --reps 30 --output benchmarks/results/ci_results.json
+
+# C++ test suite
+ctest --test-dir build --output-on-failure
 ```
 
-If you need portable CMake builds without OpenMP:
+### Optional CMake flags
 
-```bash
-cmake .. -DCMAKE_BUILD_TYPE=Release -DSIMD_ML_OPENMP=OFF
-cmake --build . --parallel
-```
+| Flag | Default | Effect |
+|---|---|---|
+| `-DSIMD_ML_OPENMP=ON` | OFF | Enable OpenMP multi-threaded GEMM |
+| `-DBENCH_OPENBLAS=ON` | OFF | Link OpenBLAS for baseline comparison in `bench_stat` |
+| `-DSIMD_ML_SANITIZE=ON` | OFF | Enable AddressSanitizer + UBSan in test binaries |
 
-## Build and run tests
-
-Within `build/`:
-
-```bash
-ctest -R simd_tests --output-on-failure
-ctest -R simd_tests_doctest --output-on-failure
-```
+---
 
 ## Python extension
 
-Install the Python package in editable mode:
-
 ```bash
-cd /workspaces/SIMD-Microkernels-for-ML-Workloads
-pip install -e .
+# Build and install in editable mode (recommended for development)
+pip install -e . --no-build-isolation
+
+# Verify the extension loads
+python -c "
+import simd_kernels, numpy as np
+print(simd_kernels.build_info())
+A = np.random.randn(64, 64).astype(np.float32)
+C = simd_kernels.sgemm(A, A.T)
+print('GEMM smoke test: PASS, shape =', C.shape)
+x = np.random.randn(1024).astype(np.float32)
+y = simd_kernels.gelu(x)
+y = simd_kernels.layer_norm(x)
+print('Activation smoke tests: PASS')
+"
 ```
 
-Verify the Python API:
+### Run Python tests
 
 ```bash
-python -c "import simd_kernels; print(simd_kernels.build_info())"
+# Full suite (requires scipy for reference comparisons)
+pip install scipy
+pytest tests/test_precision.py tests/test_bindings_edge_cases.py -v
+
+# Quick smoke test (no scipy needed)
+pytest tests/test_bindings_edge_cases.py -v
+
+# Python benchmark
+python tests/test_bench.py --quick --no-plot
 ```
 
-## Benchmark automation
+---
 
-The repo includes a benchmark automation script:
+## Docker
+
+A fully pinned development environment is provided:
 
 ```bash
-./benchmarks/run_bench.sh
+docker build -t intrinsicml .
+docker run --rm intrinsicml ./build/bench
+docker run --rm intrinsicml ctest --test-dir build --output-on-failure
 ```
 
-It builds the benchmark and writes a JSON report to `benchmarks/results/bench_results.json`.
+---
 
-## Recommended workflow
+## Reproducible performance benchmarking
 
-1. Build in `Release` mode.
-2. Enable `SIMD_ML_OPENMP` when exercising threaded GEMM.
-3. Use the benchmark JSON output for deterministic comparison.
-4. Run unit tests after any kernel or API changes.
+For results suitable for publication, lock the CPU frequency and pin to one core:
+
+```bash
+# Linux: require root or CAP_SYS_NICE
+sudo cpupower frequency-set -g performance
+taskset -c 0 ./build/bench_stat \
+    --reps 50 \
+    --output benchmarks/results/gemm_results.json
+
+# Regression check against committed baseline
+python benchmarks/check_regression.py \
+    --baseline benchmarks/results/gemm_results.json \
+    --current  benchmarks/results/ci_gemm_results.json \
+    --max-regression-pct 15
+```
+
+Without frequency locking, `bench_stat` CI widths are typically 3–5× wider
+(shared-CPU noise). These numbers are suitable for longitudinal tracking but
+should not be cited as absolute performance claims.
