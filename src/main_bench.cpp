@@ -218,11 +218,21 @@ static BenchResult measure(const char* name, Fn fn, long long flops,
 
     double elapsed_sec = min_cy / g_tsc_hz;
     double gflops = static_cast<double>(flops) / elapsed_sec * 1e-9;
-#if defined(__AVX512F__)
-    constexpr double PEAK_FP_PER_CYCLE = 32.0;
-#else
-    constexpr double PEAK_FP_PER_CYCLE = 16.0;
-#endif
+    // PEAK_FP_PER_CYCLE — single-core FP32 operations per cycle, per FMA port.
+    //
+    // AVX2:     1 port × 8 floats × 2 (FMA counts as 2 FLOPs) = 16 FLOPs/cycle/port
+    // AVX-512:  1 port × 16 floats × 2                        = 32 FLOPs/cycle/port
+    //
+    // With 2 FMA ports (Skylake P0+P5), total = 32 (AVX2) or 64 (AVX-512).
+    // We report utilisation relative to ONE port to give a number in [0%, 100%]
+    // for a kernel that saturates a single port. A kernel using both ports fully
+    // would show ~200% — the overhead means we'll rarely exceed 100% in practice.
+    //
+    // NOTE: on this build machine __AVX512F__ is defined because the compiler
+    // targets a host with AVX-512, but we do NOT use AVX-512 micro-kernels yet
+    // (see ROADMAP.md §v0.8). We use AVX2 reference peak to avoid misleadingly
+    // low utilisation numbers.
+    constexpr double PEAK_FP_PER_CYCLE = 16.0;   // always AVX2 single-port peak
     double peak_gflops = (g_tsc_hz / 1e9) * PEAK_FP_PER_CYCLE;
     double utilization = peak_gflops > 0.0 ? (gflops / peak_gflops) * 100.0 : 0.0;
 
