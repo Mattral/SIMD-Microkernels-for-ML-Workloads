@@ -29,8 +29,12 @@ check_cxx_compiler_flag("-mfma"     COMPILER_HAS_FMA)
 # -DNDEBUG      : disable assert() overhead in production
 
 if(CMAKE_CXX_COMPILER_ID MATCHES "GNU|Clang")
-    set(PERF_FLAGS "-O3" "-march=native" "-mfma" "-ffast-math" "-DNDEBUG")
-    set(PRECISION_FLAGS "-O2" "-march=native" "-mfma" "-DNDEBUG")
+    # -Wall -Wextra: enable broad warning set to catch real defects.
+    # NOT -Werror: warning sets differ across GCC/Clang versions; -Werror
+    #              would cause spurious CI failures on newer compilers.
+    set(WARN_FLAGS "-Wall" "-Wextra" "-Wshadow" "-Wno-unused-parameter")
+    set(PERF_FLAGS      "-O3" "-march=native" "-mfma" "-ffast-math" "-DNDEBUG" ${WARN_FLAGS})
+    set(PRECISION_FLAGS "-O2" "-march=native" "-mfma" "-DNDEBUG"              ${WARN_FLAGS})
     if(COMPILER_HAS_AVX512F)
         message(STATUS "AVX-512 compiler support detected. Building for host ISA only.")
     elseif(COMPILER_HAS_AVX2)

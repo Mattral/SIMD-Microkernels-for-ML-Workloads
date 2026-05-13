@@ -28,7 +28,6 @@ namespace activations {
 void silu_avx2(const float* input, float* output, int n) {
 #ifdef __AVX2__
     const __m256 half = _mm256_set1_ps(0.5f);
-    const __m256 one  = _mm256_set1_ps(1.0f);
 
     int i = 0;
     // Main AVX2 loop: 8 elements per iteration
