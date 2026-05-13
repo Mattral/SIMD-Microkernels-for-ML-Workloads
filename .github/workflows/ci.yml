@@ -183,15 +183,30 @@ jobs:
     name: All checks passed
     needs: [cpp, python, sanitizers]
     runs-on: ubuntu-latest
+    # Run even if earlier jobs fail so we always get a status update.
+    # 'skipped' is treated as success (e.g. matrix jobs skipped due to
+    # path filters or manual workflow_dispatch without certain inputs).
     if: always()
     steps:
-      - name: Verify all jobs succeeded
+      - name: Verify all required jobs succeeded
         run: |
-          results='${{ needs.cpp.result }} ${{ needs.python.result }} ${{ needs.sanitizers.result }}'
-          for r in $results; do
-            if [[ "$r" != "success" ]]; then
-              echo "❌  A CI job did not succeed (results: $results)"
-              exit 1
+          cpp_result="${{ needs.cpp.result }}"
+          python_result="${{ needs.python.result }}"
+          san_result="${{ needs.sanitizers.result }}"
+          echo "cpp:        $cpp_result"
+          echo "python:     $python_result"
+          echo "sanitizers: $san_result"
+
+          failed=0
+          for r in "$cpp_result" "$python_result" "$san_result"; do
+            # Accept 'success' or 'skipped'; reject 'failure' or 'cancelled'.
+            if [[ "$r" != "success" && "$r" != "skipped" ]]; then
+              failed=1
             fi
           done
-          echo "✅  All CI jobs passed."
+
+          if [[ $failed -eq 1 ]]; then
+            echo "❌  One or more required CI jobs did not succeed."
+            exit 1
+          fi
+          echo "✅  All required CI jobs passed."
