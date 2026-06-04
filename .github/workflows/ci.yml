@@ -1,0 +1,149 @@
+name: CI
+ 
+on:
+  push:
+    branches: [ main, master ]
+  pull_request:
+    branches: [ main, master ]
+ 
+jobs:
+  # ─── C++ Build + Test ───────────────────────────────────────────────────────
+  cpp:
+    name: C++ (${{ matrix.os }} / ${{ matrix.compiler }})
+    runs-on: ${{ matrix.os }}
+ 
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: ubuntu-22.04
+            compiler: gcc-12
+            cc: gcc-12
+            cxx: g++-12
+          - os: ubuntu-22.04
+            compiler: clang-15
+            cc: clang-15
+            cxx: clang++-15
+          - os: ubuntu-24.04
+            compiler: gcc-13
+            cc: gcc-13
+            cxx: g++-13
+ 
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+ 
+      - name: Install system dependencies
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y \
+            ${{ matrix.cc }} ${{ matrix.cxx }} \
+            cmake ninja-build \
+            python3-dev python3-pip
+ 
+      - name: Install pybind11
+        run: pip3 install pybind11[global] numpy
+ 
+      - name: Configure CMake
+        env:
+          CC:  ${{ matrix.cc }}
+          CXX: ${{ matrix.cxx }}
+        run: |
+          cmake -S . -B build \
+            -G Ninja \
+            -DCMAKE_BUILD_TYPE=Release \
+            -DCMAKE_C_COMPILER=${{ matrix.cc }} \
+            -DCMAKE_CXX_COMPILER=${{ matrix.cxx }}
+ 
+      - name: Build
+        run: cmake --build build --parallel
+ 
+      - name: Run C++ tests
+        run: ctest --test-dir build --output-on-failure --parallel 4
+ 
+      - name: Run standalone benchmark (smoke test)
+        run: ./build/bench 2>&1 | head -60
+ 
+  # ─── Python Extension Build + Precision Tests ───────────────────────────────
+  python:
+    name: Python ${{ matrix.python-version }} / ${{ matrix.os }}
+    runs-on: ${{ matrix.os }}
+ 
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ ubuntu-22.04, ubuntu-24.04 ]
+        python-version: [ "3.10", "3.11", "3.12" ]
+ 
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+ 
+      - name: Set up Python ${{ matrix.python-version }}
+        uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python-version }}
+ 
+      - name: Install build tools
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y cmake ninja-build g++-12
+          pip install --upgrade pip
+          pip install scikit-build-core pybind11 numpy pytest
+ 
+      - name: Build and install Python extension
+        run: pip install -e . --no-build-isolation -v
+ 
+      - name: Verify extension loads
+        run: |
+          python -c "
+          import simd_kernels
+          print(simd_kernels.build_info())
+          import numpy as np
+          A = np.random.randn(32, 32).astype(np.float32)
+          B = np.random.randn(32, 32).astype(np.float32)
+          C = np.zeros((32, 32), dtype=np.float32)
+          simd_kernels.sgemm(A, B, C)
+          print('sgemm smoke test: PASS')
+          x = np.random.randn(1024).astype(np.float32)
+          simd_kernels.gelu_inplace(x)
+          print('gelu_inplace smoke test: PASS')
+          "
+ 
+      - name: Run Python precision tests
+        run: pytest tests/test_precision.py -v --tb=short
+ 
+      - name: Run Python benchmark (smoke test — no plot output)
+        run: python tests/test_bench.py --no-plot --quick
+ 
+  # ─── AVX-512 path (requires a Sapphire Rapids runner or QEMU) ───────────────
+  # Uncomment if you have access to an AVX-512 capable GitHub runner.
+  # avx512:
+  #   name: AVX-512 (self-hosted)
+  #   runs-on: [ self-hosted, avx512 ]
+  #   steps:
+  #     - uses: actions/checkout@v4
+  #     - run: cmake -S . -B build -G Ninja -DCMAKE_BUILD_TYPE=Release
+  #     - run: cmake --build build --parallel
+  #     - run: ctest --test-dir build --output-on-failure
+ 
+  # ─── Summary gate ────────────────────────────────────────────────────────────
+  all-pass:
+    name: All checks passed
+    needs: [ cpp, python ]
+    runs-on: ubuntu-latest
+    if: always()
+    steps:
+      - name: Check all jobs succeeded
+        run: |
+          if [[ "${{ needs.cpp.result }}" != "success" || \
+                "${{ needs.python.result }}" != "success" ]]; then
+            echo "One or more CI jobs failed."
+            exit 1
+          fi
+          echo "All CI jobs passed."
+ 
+
+
+
+
