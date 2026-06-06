@@ -464,22 +464,28 @@ static void print_roofline_summary(const std::vector<BenchmarkRecord>& records) 
     double ridge = peak_gflops_one_port / bw_gb_s;  // FLOP/byte
     printf("  %-44s %.1f FLOP/byte\n", "Roofline ridge point:", ridge);
 
-    // Print arithmetic intensity for each GEMM size
-    printf("\n  %-18s %-20s %-12s %-10s\n",
-           "Size", "Arith. Intensity", "Regime", "Measured util%%");
-    printf("  %s\n", std::string(65, '-').c_str());
+    // Print arithmetic intensity for each SIMD GEMM size only.
+    // Scalar GEMM rows are excluded — their low utilisation would make the
+    // table misleading (e.g. "64: 4.8%" next to "64: 89.4%").
+    printf("\n  %-12s %-22s %-16s %-10s %-10s\n",
+           "Size", "Arith. Intensity", "Regime", "GFLOPS", "Util%%");
+    printf("  %s\n", std::string(75, '-').c_str());
 
     for (const auto& r : records) {
         if (r.category != "gemm" || r.M == 0) continue;
+        // Skip scalar rows — only show SIMD measurements in the roofline table
+        if (r.name.find("Scalar") != std::string::npos) continue;
         int N = r.N;
+        // Label: "NxN" extracted from the record's M and N fields (not from name string)
+        char size_label[32];
+        snprintf(size_label, sizeof(size_label), "%d\xd7%d", r.M, r.N);
         // AI = 2*N^3 / (3*N^2*4 bytes) for square GEMM (ignoring caching)
-        double ai = (2.0 * N * N * N) / (3.0 * N * N * 4);
+        double ai = (2.0 * N * N * N) / (3.0 * N * N * 4.0);
         const char* regime = (ai > ridge) ? "Compute-bound" : "Memory-bound";
         double util = (peak_gflops_one_port > 0.0)
             ? r.result.gflops / peak_gflops_one_port * 100.0 : 0.0;
-        printf("  %-18s %-20.1f %-12s %.1f%%\n",
-               r.name.substr(r.name.find_last_of(' ')+1).c_str(),
-               ai, regime, util);
+        printf("  %-12s %-22.1f %-16s %-10.1f %.1f%%\n",
+               size_label, ai, regime, r.result.gflops, util);
     }
 
     printf("\n  Note: util%% > 50%% = using one FMA port near capacity.\n");
