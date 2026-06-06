@@ -83,7 +83,7 @@ def layer_norm_numpy(x: np.ndarray, gamma=None, beta=None, eps=1e-5) -> np.ndarr
 class TestGEMM:
     """Verify simd_kernels.sgemm matches np.dot to within FP32 tolerance."""
 
-    GEMM_TOL = 5e-2  # -ffast-math allows FP reassociation; O(K*eps_mach) error   # FMA re-association with -ffast-math may reorder sums
+    GEMM_TOL = 5e-2  # -ffast-math allows FP reassociation; O(K*eps_mach) accumulated error
 
     @pytest.mark.parametrize("M,N,K", [
         (1,   1,   1),
@@ -165,7 +165,7 @@ class TestGEMM:
 class TestGeLU:
     """Verify SIMD GeLU matches the fast tanh approximation reference."""
 
-    GELU_TOL = 1e-4  # Cody-Waite exp-tanh: < 2e-7 abs tanh error, amplified by GeLU scaling   # rational polynomial approximation error budget
+    GELU_TOL = 1e-4  # Cody-Waite exp-tanh: < 2e-7 abs tanh error, amplified by GeLU formula scaling
 
     @pytest.mark.parametrize("n", [1, 7, 8, 9, 16, 64, 1024, 65536])
     def test_gelu_vs_tanh_approx(self, n):
