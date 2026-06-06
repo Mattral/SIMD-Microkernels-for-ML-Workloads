@@ -52,7 +52,7 @@ void sgemm_(char* transa, char* transb,
 }
 #endif
 
-// ─── Configuration ────────────────────────────────────────────────────────────
+// --- Configuration ------------------------------------------------------------
 
 struct BenchConfig {
     std::vector<int> gemm_sizes  = {64, 128, 256, 512, 1024};
@@ -63,7 +63,7 @@ struct BenchConfig {
     bool             quiet       = false;
 };
 
-// ─── Timer ───────────────────────────────────────────────────────────────────
+// --- Timer -------------------------------------------------------------------
 
 using Clock = std::chrono::steady_clock;
 
@@ -71,7 +71,7 @@ static inline double now_seconds() {
     return std::chrono::duration<double>(Clock::now().time_since_epoch()).count();
 }
 
-// ─── Statistics ───────────────────────────────────────────────────────────────
+// --- Statistics ---------------------------------------------------------------
 
 struct Stats {
     double min_s;
@@ -120,7 +120,7 @@ static Stats compute_stats(std::vector<double>& times) {
     return s;
 }
 
-// ─── Benchmark helpers ────────────────────────────────────────────────────────
+// --- Benchmark helpers --------------------------------------------------------
 
 static double gflops_sgemm(int N, double time_s) {
     // 2*N^3 FLOP for square GEMM (N multiply-adds)
@@ -131,7 +131,7 @@ static double gelems_per_sec(int n, double time_s) {
     return static_cast<double>(n) / time_s * 1e-9;
 }
 
-// ─── JSON builder ─────────────────────────────────────────────────────────────
+// --- JSON builder -------------------------------------------------------------
 
 struct JsonDoc {
     std::ostringstream ss;
@@ -159,8 +159,8 @@ struct JsonDoc {
            << "\"median_ms\":" << st.median_s * 1e3 << ","
            << "\"stddev_ms\":" << st.stddev_s * 1e3 << ","
            << "\"ci95_half_ms\":" << st.ci95_half * 1e3 << ","
-           << "\"gflops_peak\":" << gflops_sgemm(N, st.min_s) << ","
-           << "\"gflops_mean\":" << gflops_sgemm(N, st.mean_s) << "}";
+           << "\"gflops_min_latency\":" << gflops_sgemm(N, st.min_s) << ","
+           << "\"gflops_mean_latency\":" << gflops_sgemm(N, st.mean_s) << "}";
     }
 
     void gelu_entry(const std::string& kernel, int n, const Stats& st,
@@ -179,7 +179,7 @@ struct JsonDoc {
     std::string str() const { return ss.str(); }
 };
 
-// ─── CPU affinity ─────────────────────────────────────────────────────────────
+// --- CPU affinity -------------------------------------------------------------
 
 static void pin_to_core(int core_id) {
 #ifdef __linux__
@@ -197,7 +197,7 @@ static void pin_to_core(int core_id) {
 #endif
 }
 
-// ─── Argument parsing ─────────────────────────────────────────────────────────
+// --- Argument parsing ---------------------------------------------------------
 
 static BenchConfig parse_args(int argc, char** argv) {
     BenchConfig cfg;
@@ -234,7 +234,7 @@ static BenchConfig parse_args(int argc, char** argv) {
     return cfg;
 }
 
-// ─── Main ─────────────────────────────────────────────────────────────────────
+// --- Main ---------------------------------------------------------------------
 
 int main(int argc, char** argv) {
     BenchConfig cfg = parse_args(argc, argv);
@@ -249,10 +249,10 @@ int main(int argc, char** argv) {
     JsonDoc doc;
     doc.begin();
 
-    // ─── GEMM Benchmarks ─────────────────────────────────────────────────────
+    // --- GEMM Benchmarks -----------------------------------------------------
     printf("=== GEMM Benchmarks (C = A @ B, float32, single-threaded) ===\n");
     printf("  %-12s  %5s  %8s  %18s  %8s  %8s\n",
-           "Kernel", "N", "min ms", "mean±CI ms", "median ms", "peak GFLOPS");
+           "Kernel", "N", "min ms", "mean±CI ms", "median ms", "min GFLOPS");
     printf("  %-12s  %5s  %8s  %18s  %8s  %8s\n",
            "------", "---", "------", "----------", "---------", "-----------");
 
@@ -270,7 +270,7 @@ int main(int argc, char** argv) {
             B[i] = (float)((i * 17 + 3) % 100) * 0.01f - 0.5f;
         }
 
-        // ── Packed SIMD GEMM ──────────────────────────────────────────────
+        // -- Packed SIMD GEMM ----------------------------------------------
         {
             std::vector<double> times(cfg.meas_reps);
 
@@ -298,7 +298,7 @@ int main(int argc, char** argv) {
         }
 
 #ifdef BENCH_WITH_OPENBLAS
-        // ── OpenBLAS comparison ───────────────────────────────────────────
+        // -- OpenBLAS comparison -------------------------------------------
         {
             std::vector<double> times(cfg.meas_reps);
             char transa = 'N', transb = 'N';
@@ -329,7 +329,7 @@ int main(int argc, char** argv) {
     }
     doc.end_array();
 
-    // ─── GeLU Benchmarks ─────────────────────────────────────────────────────
+    // --- GeLU Benchmarks -----------------------------------------------------
     printf("\n=== GeLU Benchmarks (element-wise, float32) ===\n");
     printf("  %-12s  %8s  %8s  %18s  %8s  %12s\n",
            "Kernel", "n", "min ms", "mean±CI ms", "median ms", "GElems/s");
@@ -344,7 +344,7 @@ int main(int argc, char** argv) {
         auto x_out = make_aligned_array<float>(n);
         for (int i = 0; i < n; ++i) x_in[i] = (float)(i % 1000) * 0.01f - 5.0f;
 
-        // ── SIMD GeLU ────────────────────────────────────────────────────
+        // -- SIMD GeLU ----------------------------------------------------
         {
             std::vector<double> times(cfg.meas_reps);
             for (int r = 0; r < cfg.warmup_reps; ++r)
@@ -366,7 +366,7 @@ int main(int argc, char** argv) {
     doc.end_array();
     doc.end();
 
-    // ─── Output JSON ──────────────────────────────────────────────────────────
+    // --- Output JSON ----------------------------------------------------------
     if (!cfg.output_path.empty()) {
         std::ofstream f(cfg.output_path);
         if (f.is_open()) {
