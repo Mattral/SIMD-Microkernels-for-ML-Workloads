@@ -405,7 +405,11 @@ void simd_sgemm(int M, int N, int K,
 #ifdef __AVX2__
                             gemm_micro_6x16_avx2(kc, Aμ, Bμ, C_ptr, ldc);
 #else
-                            scalar_block(MR, inner_NR, kc, 1.0f,
+                            // Non-AVX2 fallback: Aμ is packed with alpha already folded in,
+                            // but scalar_block reads the ORIGINAL A pointer, so alpha must
+                            // be passed explicitly here (unlike the AVX2 path where the
+                            // micro-kernel operates on alpha-pre-scaled Aμ).
+                            scalar_block(MR, inner_NR, kc, alpha,
                                          A + (i+ii)*lda + k, lda,
                                          B + k*ldb + (j+jj), ldb,
                                          C_ptr, ldc);
