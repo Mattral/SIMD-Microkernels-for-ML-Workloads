@@ -103,6 +103,25 @@
 
 ---
 
+## GeLU Benchmark Platform Dependency
+
+On Ubuntu 22.04+ with glibc ≥ 2.22, the compiler auto-vectorises loops
+containing `erff()` via the `_ZGVdN8v_erff` SVML symbol. This means the scalar
+`gelu_forward_scalar` (erff path) and `gelu_forward_avx2` (Cody–Waite tanh)
+run at approximately the same throughput on this platform.
+
+**This is not a bug.** On platforms without SVML (Alpine Linux, older glibc,
+macOS, embedded targets), `erff` runs scalar and the AVX2 tanh path achieves
+6–10× speedup. The AVX2 tanh path also avoids the `erff` function-call overhead
+entirely, producing more predictable latency in inference pipelines.
+
+**What this means for benchmarks:** The GeLU column in BENCHMARKS.md shows ~1×
+speedup on CI (Ubuntu 22.04 runner). This is accurate for that environment.
+On production servers running older glibc or containers based on Alpine, the
+speedup will be in the 6–10× range.
+
+---
+
 ## Known Honest Limitations (never remove this section)
 
 These limitations are explicitly documented to help users understand the gap
