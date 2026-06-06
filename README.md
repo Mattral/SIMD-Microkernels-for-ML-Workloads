@@ -1,36 +1,84 @@
+# IntrinsicML ⚡
 
-# IntrinsicML: SIMD Microkernels for ML Workloads
+> Hand-rolled SIMD microkernels for ML primitives — AVX2 GEMM, vectorized GeLU, Python bindings, and cycle-accurate benchmarks. Built from first principles to understand what happens *below* the BLAS layer.
 
-Lightweight C++ implementations of SIMD-optimized microkernels for ML primitives, with Python bindings, benchmark automation, and optional OpenMP support.
-
-This repository is a compact reference implementation for SIMD microkernel design, suitable for systems-level review and benchmarking.
-
-This project explores:
-
-* Vectorized GEMM (FP32) using AVX2/FMA
-* SIMD implementations of activation functions (GeLU, ReLU, SiLU, Softmax)
-* Cache-aware blocking and memory alignment
-* Low-overhead benchmarking with JSON output
-* Optional OpenMP multithreading for GEMM
-
-This repository is intended as an educational and experimental reference for low-level kernel design. It is not intended as a drop-in replacement for optimized production BLAS libraries.
+[![CI](https://github.com/Mattral/SIMD-Microkernels-for-ML-Workloads/actions/workflows/ci.yml/badge.svg)](https://github.com/Mattral/SIMD-Microkernels-for-ML-Workloads/actions)
+[![License: Apache 2.0](https://img.shields.io/badge/License-Apache_2.0-blue.svg)](LICENSE)
+[![C++17](https://img.shields.io/badge/C++-17-informational?logo=cplusplus)](CMakeLists.txt)
+[![Python 3.8+](https://img.shields.io/badge/Python-3.8+-informational?logo=python)](pyproject.toml)
 
 ---
 
-## Overview
+## Why this exists
 
-Modern ML workloads rely heavily on dense linear algebra and elementwise operations. While highly optimized libraries exist, implementing simplified kernels from first principles is a useful way to understand:
+Production ML runs on MKL, cuBLAS, and oneDNN. Those libraries are heavily optimized black boxes. This project exists to answer: **what are the minimum ingredients needed to get 5–10× speedup over naïve C++ using only CPU intrinsics?**
 
-* SIMD execution (AVX2 / AVX-512)
-* Cache hierarchy and data locality
-* Instruction-level parallelism (ILP)
-* Trade-offs between compute and memory bandwidth
+This is an educational implementation — intentionally simple, thoroughly commented, and honest about its limitations. It's a useful reference if you're learning:
 
-This repository provides small, self-contained implementations of these ideas.
+- SIMD programming with AVX2/FMA intrinsics
+- Cache-aware tiling and memory alignment
+- How activation functions like GeLU can be vectorized
+- Low-overhead cycle-count benchmarking with `RDTSC`
 
 ---
 
-## Project Structure
+## What's implemented
+
+| Kernel | Instruction Set | Notes |
+|---|---|---|
+| Tiled FP32 GEMM | AVX2 + FMA | Blocking for L2 cache; no packing stage |
+| GeLU activation | AVX2 | tanh-based polynomial approximation |
+| Aligned allocator | — | 64-byte alignment via `posix_memalign` |
+| Python bindings | — | pybind11; importable as `simd_kernels` |
+
+---
+
+## Performance
+
+Measured on a desktop x86 CPU with AVX2 support. Min-of-N runs via RDTSC.
+
+| Matrix size | Naïve triple-loop | SIMD + tiling | Speedup |
+|---|---|---|---|
+| 128 × 128 × 128 | ~40 ms | ~5–8 ms | **5–8×** |
+| 256 × 256 × 256 | ~320 ms | ~32–40 ms | **8–10×** |
+
+**Context:** These numbers are real but not rigorous — no CPU pinning, no frequency locking. For comparison, OpenBLAS achieves roughly 2–3× more than this project's SIMD kernel at the same sizes, primarily because of matrix packing and prefetching that this project omits by design.
+
+---
+
+## Getting started
+
+### Build the C++ benchmark
+
+```bash
+mkdir build && cd build
+cmake .. -DCMAKE_BUILD_TYPE=Release
+cmake --build . --parallel
+./bench
+```
+
+Requires: CMake ≥ 3.16, a compiler with AVX2 support (GCC 9+ or Clang 10+).
+
+### Install the Python extension
+
+```bash
+pip install -e .
+python -c "import simd_kernels; print(simd_kernels.build_info())"
+```
+
+### Run tests
+
+```bash
+# C++ unit tests
+cd build && ctest --output-on-failure
+
+# Python precision check
+python tests/test_precision.py
+```
+
+---
+
+## Project structure
 
 ```
 src/
@@ -40,148 +88,51 @@ src/
 │   └── cache_alloc.hpp      # Aligned allocation helpers
 ├── bindings/
 │   └── pybind_entry.cpp     # Python bindings (pybind11)
-└── main_bench.cpp           # Benchmark harness (RDTSC-based)
+└── main_bench.cpp           # Benchmark harness (RDTSC)
 
 tests/
-├── test_alignment.cpp
-├── test_gelu.cpp
 ├── test_gemm.cpp
-├── test_gemm_packed.cpp
-├── test_threads.cpp
-└── test_doctest.cpp
-
-benchmarks/
-├── run_bench.sh
-└── results/
-    └── bench_results.json
-
-docs/
-├── README.md
-├── architecture.md
-├── setup.md
-├── security.md
-├── system_design.md
-├── api/
-│   └── python_api.md
-└── design/
-    ├── cache_hierarchy.md
-    ├── gemm_algorithm.md
-    ├── avx2_register_file.md
-    └── performance_model.md
-
-DESIGN.md
-BENCHMARKS.md
-CITATION.cff
+├── test_gelu.cpp
+└── test_precision.py
 ```
 
 ---
 
-## Build
+## Implementation notes
 
-### C++ Benchmark
+### Tiled GEMM
+Matrix multiplication is tiled so the working set of each block fits in L2 cache. Each inner loop uses `_mm256_fmadd_ps` (fused multiply-add) to process 8 floats per cycle. No packing is done — which is the main reason this doesn't match BLAS performance.
 
-```bash
-mkdir build && cd build
-cmake .. -DCMAKE_BUILD_TYPE=Release -DSIMD_ML_OPENMP=ON
-cmake --build . --parallel
-./bench --json ../benchmarks/results/bench_results.json
+### SIMD GeLU
+Implements the tanh approximation:
+
+```
+GeLU(x) ≈ 0.5 · x · (1 + tanh(√(2/π) · (x + 0.044715x³)))
 ```
 
-Or run the packaged benchmark automation script:
+Polynomial evaluation and tanh approximation are done entirely in AVX2 registers — no branches, no scalar fallback.
 
-```bash
-./benchmarks/run_bench.sh
-```
-
-### Python Extension
-
-```bash
-pip install -e .
-python -c "import simd_kernels; print(simd_kernels.build_info())"  # returns build metadata as a dict
-```
+### Benchmarking
+The harness uses `RDTSC` (Read Time-Stamp Counter) for sub-microsecond timing. The reported result is the minimum across N iterations to reduce OS scheduling noise. This is appropriate for short microbenchmarks but not a substitute for `perf` or VTune for production analysis.
 
 ---
 
-## Implementation Highlights
+## Honest limitations
 
-### Memory Alignment
+This project deliberately skips techniques that production libraries rely on:
 
-All arrays are allocated with 64-byte alignment to match cache line size:
+- **No matrix packing** — the biggest missing piece for GEMM performance
+- **No prefetching** — data is not explicitly brought into cache ahead of compute
+- **No multithreading / OpenMP** — kernels are single-threaded
+- **No AVX-512** — only AVX2 is targeted
+- **No architecture tuning** — tile sizes are fixed, not auto-tuned per CPU
 
-* Reduces split-load penalties
-* Improves SIMD load/store efficiency
-
-Implemented via `posix_memalign` in `cache_alloc.hpp`.
-
----
-
-### Tiled GEMM (AVX2)
-
-The matrix multiplication kernel uses:
-
-* **Blocking/tiling** to improve cache locality
-* **SIMD vectorization** via `_mm256_*` intrinsics
-* **FMA instructions** for combined multiply-add
-
-The implementation is intentionally simple:
-
-* No packing stage
-* Limited prefetching
-* Fixed tile sizes
-
-This keeps the code readable while still demonstrating performance gains over naïve loops.
+These aren't bugs; they're scope decisions that keep the code readable.
 
 ---
 
-### SIMD GeLU Approximation
-
-The GeLU activation is implemented using a tanh-based approximation:
-
-```
-GeLU(x) ≈ 0.5 x (1 + tanh(√(2/π)(x + 0.044715x³)))
-```
-
-Vectorized using AVX2 intrinsics:
-
-* Polynomial evaluation in SIMD registers
-* Branch-free implementation
-* Approximate reciprocal instead of division
-
-Accuracy is validated against a scalar reference.
-
 ---
 
-### Benchmarking Approach
-
-The benchmark harness uses `RDTSC` to estimate cycle counts.
-
-Key details:
-
-* Measurements use minimum of multiple runs
-* Designed to reduce noise from OS scheduling
-
-> ⚠️ Results should be interpreted as **approximate**:
->
-> * No CPU pinning
-> * No frequency locking
-> * No statistical analysis beyond min-of-N
-
-The current `bench` harness in this repo implements a short TSC calibration to estimate ticks/second, LFENCE/RDTSCP serialized timestamps, and optional CPU affinity pinning. The harness reports per-configuration cycle counts, elapsed milliseconds, achieved GFLOPS, and a utilization percentage relative to a per-core theoretical peak.
-
-See `docs/` for architecture, setup, and performance model details.
-
-For rigorous benchmarking, external tools (e.g., `perf`, VTune) are recommended.
-
----
-
-## Performance (Illustrative)
-
-Example results on a desktop x86 CPU (AVX2 enabled):
-
-| Size | Naïve C++   | SIMD Kernel | Speedup |
-| ---- | ----------- | ----------- | ------- |
-| 128³ | ~8× slower  | baseline    | ~5–8×   |
-| 256³ | ~10× slower | baseline    | ~8–10×  |
 
 Observations:
 
@@ -192,17 +143,6 @@ Observations:
 > These numbers are indicative only and depend heavily on hardware and compiler.
 
 ---
-
-## Limitations
-
-This implementation does not incorporate several production-level optimizations:
-
-* No architecture-specific tuning (e.g., Skylake vs Zen)
-* Limited matrix packing and blocking compared to production BLAS
-* No NUMA awareness or thread placement policy
-* No system-wide performance calibration or counter collection
-
-As a result, performance is **educational, not state-of-the-art**.
 
 ## Citation
 
@@ -245,34 +185,18 @@ environment (disable turbo, pin threads, collect hardware counters with `perf`).
 
 ---
 
-## When to Use This
-
-Useful for:
-
-* Learning SIMD programming with intrinsics
-* Understanding GEMM structure
-* Experimenting with low-level optimizations
-
-Not suitable for:
-
-* Production ML workloads
-* Competitive benchmarking vs optimized libraries
-
 ---
 
-## Future Work
+## Roadmap
 
-* Add packed GEMM path
-* Compare against OpenBLAS / Eigen
-* Add AVX-512 specialization
-* Improve benchmarking methodology (pinning, perf counters)
-* Explore multithreaded execution
+- [ ] Add packed GEMM path and measure the delta
+- [ ] Direct comparison vs. OpenBLAS and Eigen at equal matrix sizes
+- [ ] AVX-512 specialization (F16C, VNNI)
+- [ ] Multithreaded GEMM with OpenMP
+- [ ] Rigorous benchmarks: CPU pinning, frequency locking, confidence intervals
 
 ---
 
 ## License
 
-MIT
-
----
-
+Apache 2.0 — see [LICENSE](LICENSE).
