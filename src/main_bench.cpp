@@ -478,7 +478,7 @@ static void print_roofline_summary(const std::vector<BenchmarkRecord>& records) 
         int N = r.N;
         // Label: "NxN" extracted from the record's M and N fields (not from name string)
         char size_label[32];
-        snprintf(size_label, sizeof(size_label), "%d\xd7%d", r.M, r.N);
+        snprintf(size_label, sizeof(size_label), "%dx%d", r.M, r.N);
         // AI = 2*N^3 / (3*N^2*4 bytes) for square GEMM (ignoring caching)
         double ai = (2.0 * N * N * N) / (3.0 * N * N * 4.0);
         const char* regime = (ai > ridge) ? "Compute-bound" : "Memory-bound";

@@ -15,14 +15,18 @@ jobs:
       - name: Install dependencies
         run: |
           sudo apt-get update -qq
-          sudo apt-get install -y cmake ninja-build g++ libopenblas-dev \
-            libpybind11-dev python3-dev python3-pip
-          pip3 install numpy
+          # Pin g++-12 to match the rest of CI; avoid defaulting to GCC-11
+          sudo apt-get install -y cmake ninja-build g++-12 \
+            libopenblas-dev python3-dev python3-pip
+          # Use pip pybind11[global] (>=2.11) rather than libpybind11-dev
+          # (which pins an older system version and can conflict)
+          pip3 install "pybind11[global]>=2.11" numpy scikit-build-core
 
       - name: Build (with OpenBLAS for baseline comparison)
         run: |
           cmake -S . -B build -G Ninja \
             -DCMAKE_BUILD_TYPE=Release \
+            -DCMAKE_CXX_COMPILER=g++-12 \
             -DBENCH_OPENBLAS=ON
           cmake --build build --parallel
 
