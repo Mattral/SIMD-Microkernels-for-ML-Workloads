@@ -5,7 +5,6 @@
 namespace simd_ml {
 namespace gemm { void sgemm_packed(int M, int N, int K, float alpha, const float* A, int lda, const float* B, int ldb, float beta, float* C, int ldc); }
 namespace gemm_ref { void naive_sgemm(int M, int N, int K, float alpha, const float* A, int lda, const float* B, int ldb, float beta, float* C, int ldc); }
-namespace activations { void gelu_avx2(const float*, float*, int); }
 
 namespace dispatch {
 

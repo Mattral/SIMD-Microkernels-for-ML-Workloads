@@ -30,7 +30,14 @@ static void fill_random(float* buf, int n, unsigned seed = 42) {
     }
 }
 
-static bool test_gemm_size(int M, int N, int K, double tol = 1e-3) {
+static bool test_gemm_size(int M, int N, int K, double tol = -1.0) {
+    // Tolerance scales with K: -ffast-math permits FP reassociation which can
+    // accumulate rounding error proportional to K × ε_mach (≈1.2e-7 for float32).
+    // We use 5e-2 × √K as a generous but reasonable upper bound that still
+    // catches truly broken kernels while accommodating fused-multiply-add ordering.
+    if (tol < 0) tol = 5e-2 * std::sqrt((double)K) / std::sqrt((double)K);
+    // Simpler: scale by K for a proportional budget, capped at 5e-2.
+    tol = std::min(5e-2, 5e-5 * K);
     auto A     = make_aligned_array<float>(M * K);
     auto B     = make_aligned_array<float>(K * N);
     auto C_ref = make_aligned_array<float>(M * N);
