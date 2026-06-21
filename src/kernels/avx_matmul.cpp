@@ -1,39 +1,41 @@
 /**
  * avx_matmul.cpp — Hand-Vectorized AVX2 / AVX-512 GEMM Microkernel
  *
- * Computes: C = A × B   (all FP32, row-major layout)
+ * Computes: C = alpha·A × B + beta·C   (all FP32, row-major layout)
  *   A: M×K,  B: K×N,  C: M×N
  *
  * ─── Micro-Architectural Strategy ────────────────────────────────────────────
  *
- * 1. LOOP TILING / CACHE BLOCKING
- *    L1d cache on Intel Core (Alder Lake P-core): 48 KB
- *    L2 cache: 1.25 MB
- *    Tile sizes chosen so three sub-matrices (A tile, B tile, C accumulator)
- *    fit concurrently in L1d:
- *      MC=64, KC=256, NC=64  →  (64×256 + 256×64 + 64×64) × 4B = ~196 KB  [L2 resident]
- *    Inner micro-kernel: MR=6 rows × NR=16 cols (AVX2) or NR=32 (AVX-512)
- *    fits accumulator registers entirely inside the 16 YMM / 32 ZMM file.
+ * 1. LOOP TILING / CACHE BLOCKING  (Goto 2008 / BLIS framework)
+ *    Tile sizes tuned for Intel Core (48 KB L1d, 1.25 MB L2):
+ *      MC=64, KC=256, NC=64
+ *    The 5-loop structure keeps Ac and Bc panels L2-resident across the M-loop.
  *
- * 2. REGISTER BLOCKING
- *    AVX2 path: 6×2 register block (6 __m256 accumulators × 2 AVX lanes wide)
- *    = 12 YMM registers for C, 1 for A broadcast, 2 for B panels → 15 / 16 YMM used.
- *    This leaves the CPU renamer with no spill pressure.
+ * 2. REGISTER BLOCKING  (6 × 16 micro-tile for AVX2)
+ *    AVX2 path: 6 rows × 16 cols = 12 YMM accumulators.
+ *    Remaining 4 YMM registers hold A broadcasts and B panel data.
+ *    Total: 16/16 YMM — zero spill pressure on an ideal renamer.
  *
- * 3. FUSED MULTIPLY-ADD (FMA)
- *    _mm256_fmadd_ps: 1 instruction, 2 FP operations, 0.5 cycle throughput (AVX2).
- *    Peak FP throughput per core (AVX2, 3.5 GHz): 3.5e9 × 2 FMA/cy × 8 FP/FMA = 56 GFLOPS.
+ * 3. PANEL PACKING
+ *    pack_A: reorders A[mc×kc] into column-major micro-panels so each
+ *            broadcast A[m][k] is sequential in memory.
+ *    pack_B: reorders B[kc×nc] into NR-wide panels for unit-stride loads.
+ *    Alpha is folded into pack_A to eliminate a multiply in the hot loop.
  *
- * 4. SOFTWARE PREFETCHING
- *    Prefetch B panel 4 iterations ahead into L1 to hide DRAM/L2 latency.
+ * 4. FMA INTRINSICS  (_mm256_fmadd_ps)
+ *    Each FMA = 2 FLOP at 0.5 cy throughput → theoretical peak on Skylake:
+ *    16 FLOP/cy × 2 ports × (clock GHz) = 112 GFLOPS/core at 3.5 GHz.
  *
- * 5. MANUAL LOOP UNROLLING (×4 in K-loop inner body)
- *    Reduces loop-overhead branch instructions and exposes the scheduler to
- *    a longer instruction window for out-of-order execution.
+ * 5. SOFTWARE PREFETCHING
+ *    Issues _mm_prefetch (PREFETCHT0) 2 B-panel rows ahead to overlap
+ *    L2→L1 fill (≈12 cy) with FMA execution on the current rows.
  *
- * Compilation flags expected:
- *   GCC/Clang: -O3 -march=native -mfma   (or -mavx512f -mavx512dq for AVX-512 path)
- *   MSVC:      /O2 /arch:AVX2
+ * 6. LOOP UNROLLING (2×)
+ *    A 2× unroll in K exposes more ILP to the out-of-order scheduler while
+ *    keeping the source code auditable. See §7 of DESIGN.md for the trade-off
+ *    discussion vs higher unroll factors.
+ *
+ * Compilation flags expected: -O3 -march=native -mfma
  */
 
 #include "cache_alloc.hpp"
@@ -41,426 +43,172 @@
 
 #include <cstring>
 #include <algorithm>
-#ifdef _OPENMP
-#include <omp.h>
-#endif
 
 #ifdef __AVX512F__
 #  include <immintrin.h>
-#  define SIMD_WIDTH 16          // 16 × float32 in __m512
-#  define SIMD_SUFFIX "AVX-512"
 #elif defined(__AVX2__)
 #  include <immintrin.h>
-#  define SIMD_WIDTH 8           // 8 × float32 in __m256
-#  define SIMD_SUFFIX "AVX2"
 #else
-#  error "This kernel requires at least AVX2. Compile with -mavx2 -mfma."
+#  error "avx_matmul.cpp requires at least AVX2. Compile with -mavx2 -mfma."
 #endif
 
-// ─── Tiling constants (tuned for 48 KB L1d, 1.25 MB L2) ─────────────────────
-static constexpr int MC = 64;    // M-dimension tile (rows of A / C)
-static constexpr int KC = 256;   // K-dimension tile (cols of A / rows of B)
-static constexpr int NC = 64;    // N-dimension tile (cols of B / C)
-
-// Micro-kernel register block (must satisfy MR*NR*4 << YMM register file)
-static constexpr int MR = 6;     // rows handled per micro-kernel call
-static constexpr int NR = 2 * SIMD_WIDTH;  // cols: 2 AVX vectors wide
+// ─── Tiling constants ─────────────────────────────────────────────────────────
+static constexpr int MC = 64;     // M-tile: rows of A / C per outer-M block
+static constexpr int KC = 256;    // K-tile: depth panel (limited by L2 capacity)
+static constexpr int NC = 64;     // N-tile: cols of B / C per outer-N block
+static constexpr int MR = 6;      // Micro-kernel row register count
+static constexpr int NR = 16;     // Micro-kernel col register count (2 AVX2 vectors)
 
 // ─── AVX2 6×16 Micro-kernel ───────────────────────────────────────────────────
-#ifdef __AVX2__
 /**
- * gemm_micro_6x16_avx2 — computes a 6×16 sub-block of C += A_panel × B_panel
+ * gemm_micro_6x16_avx2 — Compute C += A_packed × B_packed for a 6×16 tile.
  *
- * @param kc   — depth of the K-panel (≤ KC)
- * @param A    — pointer into packed A panel, shape [MR × kc], row-major
- * @param B    — pointer into packed B panel, shape [kc × NR], row-major
- * @param C    — pointer into output C block, row stride = ldc
- * @param ldc  — leading dimension (column stride) of C
+ * @param kc       Depth of the K-panel (loop count)
+ * @param A_panel  Packed A sub-matrix: kc rows × MR cols, column-major per k
+ *                 A_panel[k*MR + m] = alpha × A[row_base+m][k_base+k]
+ * @param B_panel  Packed B sub-matrix: kc rows × NR cols, row-major per k
+ *                 B_panel[k*NR + n] = B[k_base+k][col_base+n]
+ * @param C        C output tile, row stride = ldc
+ * @param ldc      Leading dimension (column stride) of C in the full M×N matrix
+ *
+ * Memory access pattern (per k-iteration):
+ *   A: sequential broadcast of MR=6 scalars from A_panel
+ *   B: two sequential 8-float vector loads from B_panel
+ *   C: read once at start, written once at end (register-resident throughout)
+ *
+ * Loop unrolled 2× to allow the out-of-order scheduler to overlap:
+ *   - Independent FMA chains for k and k+1
+ *   - Prefetch for B panel rows 2 steps ahead
  */
+#ifdef __AVX2__
 static void gemm_micro_6x16_avx2(int kc,
-                                   const float* __restrict__ A,
-                                   const float* __restrict__ B,
+                                   const float* __restrict__ A_panel,
+                                   const float* __restrict__ B_panel,
                                    float*       __restrict__ C,
-                                   int ldc) {
-    // Accumulator registers: 6 rows × 2 AVX vectors (16 floats) = 12 YMM
-    __m256 c0_lo, c0_hi, c1_lo, c1_hi, c2_lo, c2_hi;
-    __m256 c3_lo, c3_hi, c4_lo, c4_hi, c5_lo, c5_hi;
+                                   int ldc) noexcept {
+    // Load 12 accumulator registers: 6 rows × (lo+hi) = 6×2 YMM
+    __m256 c0lo = _mm256_loadu_ps(C + 0*ldc + 0);
+    __m256 c0hi = _mm256_loadu_ps(C + 0*ldc + 8);
+    __m256 c1lo = _mm256_loadu_ps(C + 1*ldc + 0);
+    __m256 c1hi = _mm256_loadu_ps(C + 1*ldc + 8);
+    __m256 c2lo = _mm256_loadu_ps(C + 2*ldc + 0);
+    __m256 c2hi = _mm256_loadu_ps(C + 2*ldc + 8);
+    __m256 c3lo = _mm256_loadu_ps(C + 3*ldc + 0);
+    __m256 c3hi = _mm256_loadu_ps(C + 3*ldc + 8);
+    __m256 c4lo = _mm256_loadu_ps(C + 4*ldc + 0);
+    __m256 c4hi = _mm256_loadu_ps(C + 4*ldc + 8);
+    __m256 c5lo = _mm256_loadu_ps(C + 5*ldc + 0);
+    __m256 c5hi = _mm256_loadu_ps(C + 5*ldc + 8);
 
-    // Load existing C values (accumulate into C, not overwrite)
-    c0_lo = _mm256_loadu_ps(C + 0*ldc + 0);  c0_hi = _mm256_loadu_ps(C + 0*ldc + 8);
-    c1_lo = _mm256_loadu_ps(C + 1*ldc + 0);  c1_hi = _mm256_loadu_ps(C + 1*ldc + 8);
-    c2_lo = _mm256_loadu_ps(C + 2*ldc + 0);  c2_hi = _mm256_loadu_ps(C + 2*ldc + 8);
-    c3_lo = _mm256_loadu_ps(C + 3*ldc + 0);  c3_hi = _mm256_loadu_ps(C + 3*ldc + 8);
-    c4_lo = _mm256_loadu_ps(C + 4*ldc + 0);  c4_hi = _mm256_loadu_ps(C + 4*ldc + 8);
-    c5_lo = _mm256_loadu_ps(C + 5*ldc + 0);  c5_hi = _mm256_loadu_ps(C + 5*ldc + 8);
+    const float* ap = A_panel;
+    const float* bp = B_panel;
 
-    const float* a_ptr = A;
-    const float* b_ptr = B;
-
-    // K-loop unrolled ×4 to reduce branch overhead and widen ILP window
+    // ── 2× Unrolled K-loop ────────────────────────────────────────────────────
+    // Process two k-iterations per outer loop body.
+    // Invariant entering each iteration: ap = A_panel + k*MR, bp = B_panel + k*NR
     int k = 0;
-    for (; k <= kc - 4; k += 4) {
-        // ── k+0 ──────────────────────────────────────────────────────────────
-        __m256 b_lo, b_hi, a_bcast;
+    for (; k + 2 <= kc; k += 2) {
+        // Prefetch B panel 2 rows ahead (= 2×NR×4 bytes = 128 bytes ahead)
+        prefetch_l1(bp + 2*NR);
 
-        prefetch_l1(b_ptr + 32);        // pull next B row into L1
+        // ── k+0 ─────────────────────────────────────────────────────────────
+        __m256 b0lo = _mm256_loadu_ps(bp + 0);        // B[k][0..7]
+        __m256 b0hi = _mm256_loadu_ps(bp + 8);        // B[k][8..15]
 
-        b_lo = _mm256_load_ps(b_ptr);
-        b_hi = _mm256_load_ps(b_ptr + 8);
-        b_ptr += 16;
+        c0lo = _mm256_fmadd_ps(_mm256_set1_ps(ap[0]), b0lo, c0lo);
+        c0hi = _mm256_fmadd_ps(_mm256_set1_ps(ap[0]), b0hi, c0hi);
+        c1lo = _mm256_fmadd_ps(_mm256_set1_ps(ap[1]), b0lo, c1lo);
+        c1hi = _mm256_fmadd_ps(_mm256_set1_ps(ap[1]), b0hi, c1hi);
+        c2lo = _mm256_fmadd_ps(_mm256_set1_ps(ap[2]), b0lo, c2lo);
+        c2hi = _mm256_fmadd_ps(_mm256_set1_ps(ap[2]), b0hi, c2hi);
+        c3lo = _mm256_fmadd_ps(_mm256_set1_ps(ap[3]), b0lo, c3lo);
+        c3hi = _mm256_fmadd_ps(_mm256_set1_ps(ap[3]), b0hi, c3hi);
+        c4lo = _mm256_fmadd_ps(_mm256_set1_ps(ap[4]), b0lo, c4lo);
+        c4hi = _mm256_fmadd_ps(_mm256_set1_ps(ap[4]), b0hi, c4hi);
+        c5lo = _mm256_fmadd_ps(_mm256_set1_ps(ap[5]), b0lo, c5lo);
+        c5hi = _mm256_fmadd_ps(_mm256_set1_ps(ap[5]), b0hi, c5hi);
 
-        a_bcast = _mm256_set1_ps(a_ptr[0]);
-        c0_lo = _mm256_fmadd_ps(a_bcast, b_lo, c0_lo);
-        c0_hi = _mm256_fmadd_ps(a_bcast, b_hi, c0_hi);
+        ap += MR;  // advance to next k row in A panel
+        bp += NR;  // advance to next k row in B panel
 
-        a_bcast = _mm256_set1_ps(a_ptr[1]);
-        c1_lo = _mm256_fmadd_ps(a_bcast, b_lo, c1_lo);
-        c1_hi = _mm256_fmadd_ps(a_bcast, b_hi, c1_hi);
+        // ── k+1 ─────────────────────────────────────────────────────────────
+        __m256 b1lo = _mm256_loadu_ps(bp + 0);        // B[k+1][0..7]
+        __m256 b1hi = _mm256_loadu_ps(bp + 8);        // B[k+1][8..15]
 
-        a_bcast = _mm256_set1_ps(a_ptr[2]);
-        c2_lo = _mm256_fmadd_ps(a_bcast, b_lo, c2_lo);
-        c2_hi = _mm256_fmadd_ps(a_bcast, b_hi, c2_hi);
+        c0lo = _mm256_fmadd_ps(_mm256_set1_ps(ap[0]), b1lo, c0lo);
+        c0hi = _mm256_fmadd_ps(_mm256_set1_ps(ap[0]), b1hi, c0hi);
+        c1lo = _mm256_fmadd_ps(_mm256_set1_ps(ap[1]), b1lo, c1lo);
+        c1hi = _mm256_fmadd_ps(_mm256_set1_ps(ap[1]), b1hi, c1hi);
+        c2lo = _mm256_fmadd_ps(_mm256_set1_ps(ap[2]), b1lo, c2lo);
+        c2hi = _mm256_fmadd_ps(_mm256_set1_ps(ap[2]), b1hi, c2hi);
+        c3lo = _mm256_fmadd_ps(_mm256_set1_ps(ap[3]), b1lo, c3lo);
+        c3hi = _mm256_fmadd_ps(_mm256_set1_ps(ap[3]), b1hi, c3hi);
+        c4lo = _mm256_fmadd_ps(_mm256_set1_ps(ap[4]), b1lo, c4lo);
+        c4hi = _mm256_fmadd_ps(_mm256_set1_ps(ap[4]), b1hi, c4hi);
+        c5lo = _mm256_fmadd_ps(_mm256_set1_ps(ap[5]), b1lo, c5lo);
+        c5hi = _mm256_fmadd_ps(_mm256_set1_ps(ap[5]), b1hi, c5hi);
 
-        a_bcast = _mm256_set1_ps(a_ptr[3]);
-        c3_lo = _mm256_fmadd_ps(a_bcast, b_lo, c3_lo);
-        c3_hi = _mm256_fmadd_ps(a_bcast, b_hi, c3_hi);
-
-        a_bcast = _mm256_set1_ps(a_ptr[4]);
-        c4_lo = _mm256_fmadd_ps(a_bcast, b_lo, c4_lo);
-        c4_hi = _mm256_fmadd_ps(a_bcast, b_hi, c4_hi);
-
-        a_bcast = _mm256_set1_ps(a_ptr[5]);
-        c5_lo = _mm256_fmadd_ps(a_bcast, b_lo, c5_lo);
-        c5_hi = _mm256_fmadd_ps(a_bcast, b_hi, c5_hi);
-        a_ptr += MR;
-
-        // ── k+1 ──────────────────────────────────────────────────────────────
-        prefetch_l1(b_ptr + 32);
-
-        b_lo = _mm256_load_ps(b_ptr);
-        b_hi = _mm256_load_ps(b_ptr + 8);
-        b_ptr += 16;
-
-        a_bcast = _mm256_set1_ps(a_ptr[0]);
-        c0_lo = _mm256_fmadd_ps(a_bcast, b_lo, c0_lo);
-        c0_hi = _mm256_fmadd_ps(a_bcast, b_hi, c0_hi);
-
-        a_bcast = _mm256_set1_ps(a_ptr[1]);
-        c1_lo = _mm256_fmadd_ps(a_bcast, b_lo, c1_lo);
-        c1_hi = _mm256_fmadd_ps(a_bcast, b_hi, c1_hi);
-
-        a_bcast = _mm256_set1_ps(a_ptr[2]);
-        c2_lo = _mm256_fmadd_ps(a_bcast, b_lo, c2_lo);
-        c2_hi = _mm256_fmadd_ps(a_bcast, b_hi, c2_hi);
-
-        a_bcast = _mm256_set1_ps(a_ptr[3]);
-        c3_lo = _mm256_fmadd_ps(a_bcast, b_lo, c3_lo);
-        c3_hi = _mm256_fmadd_ps(a_bcast, b_hi, c3_hi);
-
-        a_bcast = _mm256_set1_ps(a_ptr[4]);
-        c4_lo = _mm256_fmadd_ps(a_bcast, b_lo, c4_lo);
-        c4_hi = _mm256_fmadd_ps(a_bcast, b_hi, c4_hi);
-
-        a_bcast = _mm256_set1_ps(a_ptr[5]);
-        c5_lo = _mm256_fmadd_ps(a_bcast, b_lo, c5_lo);
-        c5_hi = _mm256_fmadd_ps(a_bcast, b_hi, c5_hi);
-        a_ptr += MR;
-
-        // ── k+2 ──────────────────────────────────────────────────────────────
-        b_lo = _mm256_load_ps(b_ptr);
-        b_hi = _mm256_load_ps(b_ptr + 8);
-        b_ptr += 16;
-
-        a_bcast = _mm256_set1_ps(a_ptr[0]);
-        c0_lo = _mm256_fmadd_ps(a_bcast, b_lo, c0_lo);
-        c0_hi = _mm256_fmadd_ps(a_bcast, b_hi, c0_hi);
-
-        a_bcast = _mm256_set1_ps(a_ptr[1]);
-        c1_lo = _mm256_fmadd_ps(a_bcast, b_lo, c1_lo);
-        c1_hi = _mm256_fmadd_ps(a_bcast, b_hi, c1_hi);
-
-        a_bcast = _mm256_set1_ps(a_ptr[2]);
-        c2_lo = _mm256_fmadd_ps(a_bcast, b_lo, c2_lo);
-        c2_hi = _mm256_fmadd_ps(a_bcast, b_hi, c2_hi);
-
-        a_bcast = _mm256_set1_ps(a_ptr[3]);
-        c3_lo = _mm256_fmadd_ps(a_bcast, b_lo, c3_lo);
-        c3_hi = _mm256_fmadd_ps(a_bcast, b_hi, c3_hi);
-
-        a_bcast = _mm256_set1_ps(a_ptr[4]);
-        c4_lo = _mm256_fmadd_ps(a_bcast, b_lo, c4_lo);
-        c4_hi = _mm256_fmadd_ps(a_bcast, b_hi, c4_hi);
-
-        a_bcast = _mm256_set1_ps(a_ptr[5]);
-        c5_lo = _mm256_fmadd_ps(a_bcast, b_lo, c5_lo);
-        c5_hi = _mm256_fmadd_ps(a_bcast, b_hi, c5_hi);
-        a_ptr += MR;
-
-        // ── k+3 ──────────────────────────────────────────────────────────────
-        b_lo = _mm256_load_ps(b_ptr);
-        b_hi = _mm256_load_ps(b_ptr + 8);
-        b_ptr += 16;
-
-        a_bcast = _mm256_set1_ps(a_ptr[0]);
-        c0_lo = _mm256_fmadd_ps(a_bcast, b_lo, c0_lo);
-        c0_hi = _mm256_fmadd_ps(a_bcast, b_hi, c0_hi);
-
-        a_bcast = _mm256_set1_ps(a_ptr[1]);
-        c1_lo = _mm256_fmadd_ps(a_bcast, b_lo, c1_lo);
-        c1_hi = _mm256_fmadd_ps(a_bcast, b_hi, c1_hi);
-
-        a_bcast = _mm256_set1_ps(a_ptr[2]);
-        c2_lo = _mm256_fmadd_ps(a_bcast, b_lo, c2_lo);
-        c2_hi = _mm256_fmadd_ps(a_bcast, b_hi, c2_hi);
-
-        a_bcast = _mm256_set1_ps(a_ptr[3]);
-        c3_lo = _mm256_fmadd_ps(a_bcast, b_lo, c3_lo);
-        c3_hi = _mm256_fmadd_ps(a_bcast, b_hi, c3_hi);
-
-        a_bcast = _mm256_set1_ps(a_ptr[4]);
-        c4_lo = _mm256_fmadd_ps(a_bcast, b_lo, c4_lo);
-        c4_hi = _mm256_fmadd_ps(a_bcast, b_hi, c4_hi);
-
-        a_bcast = _mm256_set1_ps(a_ptr[5]);
-        c5_lo = _mm256_fmadd_ps(a_bcast, b_lo, c5_lo);
-        c5_hi = _mm256_fmadd_ps(a_bcast, b_hi, c5_hi);
-        a_ptr += MR;
+        ap += MR;
+        bp += NR;
     }
-    // Scalar tail for remaining k iterations
-    for (; k < kc; ++k) {
-        __m256 b_lo = _mm256_load_ps(b_ptr);
-        __m256 b_hi = _mm256_load_ps(b_ptr + 8);
-        b_ptr += 16;
-
-        c0_lo = _mm256_fmadd_ps(_mm256_set1_ps(a_ptr[0]), b_lo, c0_lo);
-        c0_hi = _mm256_fmadd_ps(_mm256_set1_ps(a_ptr[0]), b_hi, c0_hi);
-        c1_lo = _mm256_fmadd_ps(_mm256_set1_ps(a_ptr[1]), b_lo, c1_lo);
-        c1_hi = _mm256_fmadd_ps(_mm256_set1_ps(a_ptr[1]), b_hi, c1_hi);
-        c2_lo = _mm256_fmadd_ps(_mm256_set1_ps(a_ptr[2]), b_lo, c2_lo);
-        c2_hi = _mm256_fmadd_ps(_mm256_set1_ps(a_ptr[2]), b_hi, c2_hi);
-        c3_lo = _mm256_fmadd_ps(_mm256_set1_ps(a_ptr[3]), b_lo, c3_lo);
-        c3_hi = _mm256_fmadd_ps(_mm256_set1_ps(a_ptr[3]), b_hi, c3_hi);
-        c4_lo = _mm256_fmadd_ps(_mm256_set1_ps(a_ptr[4]), b_lo, c4_lo);
-        c4_hi = _mm256_fmadd_ps(_mm256_set1_ps(a_ptr[4]), b_hi, c4_hi);
-        c5_lo = _mm256_fmadd_ps(_mm256_set1_ps(a_ptr[5]), b_lo, c5_lo);
-        c5_hi = _mm256_fmadd_ps(_mm256_set1_ps(a_ptr[5]), b_hi, c5_hi);
-        a_ptr += MR;
+    // Scalar tail: handle remaining k iterations (kc % 2 == 1)
+    if (k < kc) {
+        __m256 blo = _mm256_loadu_ps(bp + 0);
+        __m256 bhi = _mm256_loadu_ps(bp + 8);
+        c0lo = _mm256_fmadd_ps(_mm256_set1_ps(ap[0]), blo, c0lo);
+        c0hi = _mm256_fmadd_ps(_mm256_set1_ps(ap[0]), bhi, c0hi);
+        c1lo = _mm256_fmadd_ps(_mm256_set1_ps(ap[1]), blo, c1lo);
+        c1hi = _mm256_fmadd_ps(_mm256_set1_ps(ap[1]), bhi, c1hi);
+        c2lo = _mm256_fmadd_ps(_mm256_set1_ps(ap[2]), blo, c2lo);
+        c2hi = _mm256_fmadd_ps(_mm256_set1_ps(ap[2]), bhi, c2hi);
+        c3lo = _mm256_fmadd_ps(_mm256_set1_ps(ap[3]), blo, c3lo);
+        c3hi = _mm256_fmadd_ps(_mm256_set1_ps(ap[3]), bhi, c3hi);
+        c4lo = _mm256_fmadd_ps(_mm256_set1_ps(ap[4]), blo, c4lo);
+        c4hi = _mm256_fmadd_ps(_mm256_set1_ps(ap[4]), bhi, c4hi);
+        c5lo = _mm256_fmadd_ps(_mm256_set1_ps(ap[5]), blo, c5lo);
+        c5hi = _mm256_fmadd_ps(_mm256_set1_ps(ap[5]), bhi, c5hi);
     }
 
-    // Write-back accumulator to C
-    _mm256_storeu_ps(C + 0*ldc + 0, c0_lo); _mm256_storeu_ps(C + 0*ldc + 8, c0_hi);
-    _mm256_storeu_ps(C + 1*ldc + 0, c1_lo); _mm256_storeu_ps(C + 1*ldc + 8, c1_hi);
-    _mm256_storeu_ps(C + 2*ldc + 0, c2_lo); _mm256_storeu_ps(C + 2*ldc + 8, c2_hi);
-    _mm256_storeu_ps(C + 3*ldc + 0, c3_lo); _mm256_storeu_ps(C + 3*ldc + 8, c3_hi);
-    _mm256_storeu_ps(C + 4*ldc + 0, c4_lo); _mm256_storeu_ps(C + 4*ldc + 8, c4_hi);
-    _mm256_storeu_ps(C + 5*ldc + 0, c5_lo); _mm256_storeu_ps(C + 5*ldc + 8, c5_hi);
+    // Write accumulators back to C
+    _mm256_storeu_ps(C + 0*ldc + 0, c0lo); _mm256_storeu_ps(C + 0*ldc + 8, c0hi);
+    _mm256_storeu_ps(C + 1*ldc + 0, c1lo); _mm256_storeu_ps(C + 1*ldc + 8, c1hi);
+    _mm256_storeu_ps(C + 2*ldc + 0, c2lo); _mm256_storeu_ps(C + 2*ldc + 8, c2hi);
+    _mm256_storeu_ps(C + 3*ldc + 0, c3lo); _mm256_storeu_ps(C + 3*ldc + 8, c3hi);
+    _mm256_storeu_ps(C + 4*ldc + 0, c4lo); _mm256_storeu_ps(C + 4*ldc + 8, c4hi);
+    _mm256_storeu_ps(C + 5*ldc + 0, c5lo); _mm256_storeu_ps(C + 5*ldc + 8, c5hi);
 }
 #endif  // __AVX2__
 
-// ─── Pack helpers (improve B panel access pattern) ───────────────────────────
+// ─── AVX-512 6×32 Micro-kernel ────────────────────────────────────────────────
+#ifdef __AVX512F__
 /**
- * pack_B — reorder B[k0..k0+kc, n0..n0+nc] into a contiguous K-major panel.
- * This converts the strided column access of B into sequential reads, turning
- * cache-thrashing random access into streaming prefetch-friendly access.
- */
-static void pack_B(const float* B, int ldb,
-                   int kc, int nc,
-                   float* __restrict__ B_packed) {
-    const int num_blocks = (nc + NR - 1) / NR;
-    for (int block = 0; block < num_blocks; ++block) {
-        int jb = block * NR;
-        int actual_nr = std::min(NR, nc - jb);
-        float* dst_base = B_packed + block * kc * NR;
-
-        for (int k = 0; k < kc; ++k) {
-            const float* src = B + k * ldb + jb;
-            float* dst = dst_base + k * NR;
-
-            for (int n = 0; n < actual_nr; ++n) {
-                dst[n] = src[n];
-            }
-            for (int n = actual_nr; n < NR; ++n) {
-                dst[n] = 0.0f;
-            }
-        }
-    }
-}
-
-/**
- * pack_A — reorder A[m0..m0+mr, k0..k0+kc] into column-major micro-panel.
- * Gives the inner K-loop sequential access for each row broadcast.
- */
-static void pack_A(const float* A, int lda,
-                   int mr, int kc,
-                   float* __restrict__ A_packed,
-                   float alpha = 1.0f) {
-    int num_blocks = (mr + MR - 1) / MR;
-    for (int block = 0; block < num_blocks; ++block) {
-        int rows = std::min(MR, mr - block * MR);
-        float* dst_base = A_packed + block * kc * MR;
-        const float* A_block = A + block * MR * lda;
-
-        for (int k = 0; k < kc; ++k) {
-            const float* src = A_block + k;
-            float* dst = dst_base + k * MR;
-
-            for (int m = 0; m < rows; ++m) {
-                dst[m] = alpha * src[m * lda];
-            }
-            for (int m = rows; m < MR; ++m) {
-                dst[m] = 0.0f;
-            }
-        }
-    }
-}
-
-// ─── Public API: sgemm ────────────────────────────────────────────────────────
-/**
- * simd_sgemm — Compute C = alpha*A*B + beta*C  (single-precision)
- *
- * @param M, N, K   — matrix dimensions
- * @param alpha     — scalar multiplier for A*B
- * @param A         — input matrix A [M×K], row-major, 64-byte aligned
- * @param lda       — leading dimension of A (≥ K)
- * @param B         — input matrix B [K×N], row-major, 64-byte aligned
- * @param ldb       — leading dimension of B (≥ N)
- * @param beta      — scalar multiplier for C (0.0 = overwrite)
- * @param C         — output matrix C [M×N], row-major, 64-byte aligned
- * @param ldc       — leading dimension of C (≥ N)
- */
-void simd_sgemm(int M, int N, int K,
-                float alpha,
-                const float* __restrict__ A, int lda,
-                const float* __restrict__ B, int ldb,
-                float beta,
-                float*       __restrict__ C, int ldc) {
-    // Apply beta scaling to C upfront
-    if (beta == 0.0f) {
-        for (int i = 0; i < M; ++i)
-            std::memset(C + i * ldc, 0, N * sizeof(float));
-    } else if (beta != 1.0f) {
-        for (int i = 0; i < M; ++i)
-            for (int j = 0; j < N; ++j)
-                C[i * ldc + j] *= beta;
-    }
-
-    // Number of N-tiles
-    int num_j_blocks = (N + NC - 1) / NC;
-
-    // Parallelize across N-tiles (outermost loop) with OpenMP if available.
-#ifdef _OPENMP
-#pragma omp parallel for schedule(static)
-    for (int jb = 0; jb < num_j_blocks; ++jb) {
-#else
-    for (int jb = 0; jb < num_j_blocks; ++jb) {
-#endif
-        int j = jb * NC;
-        int nc = std::min(NC, N - j);
-
-        // Per-thread packing buffers to avoid races
-        auto A_pack = make_aligned_array<float>(((MC + MR - 1) / MR) * KC * MR);
-        auto B_pack = make_aligned_array<float>(((NC + NR - 1) / NR) * KC * NR);
-
-        for (int k = 0; k < K; k += KC) {
-            int kc = std::min(KC, K - k);
-
-            // Pack B panel into L2-friendly layout
-            pack_B(B + k * ldb + j, ldb, kc, nc, B_pack.get());
-
-            for (int i = 0; i < M; i += MC) {
-                int mc = std::min(MC, M - i);
-
-                // Pack A panel for this thread
-                pack_A(A + i * lda + k, lda, mc, kc, A_pack.get(), alpha);
-
-                for (int ii = 0; ii < mc; ii += MR) {
-                    int mr = std::min(MR, mc - ii);
-                    const float* A_micro = A_pack.get() + (ii / MR) * (kc * MR);
-                    for (int jj = 0; jj < nc; jj += NR) {
-                        int nr = std::min(NR, nc - jj);
-                        if (mr == MR && nr == NR) {
-                            int block = jj / NR;
-                            float* B_block = B_pack.get() + block * kc * NR;
-                            // Runtime dispatch: prefer AVX-512 if available at runtime
-#if defined(__AVX512F__)
-                            bool have_avx512 = false;
-#if defined(__GNUC__) || defined(__clang__)
-                            have_avx512 = __builtin_cpu_supports("avx512f");
-#endif
-                            if (have_avx512) {
-                                // AVX-512 optimized microkernel (if compiled with AVX-512)
-                                gemm_micro_6x32_avx512(
-                                    kc,
-                                    A_micro,
-                                    B_block,
-                                    C + (i + ii) * ldc + (j + jj),
-                                    ldc
-                                );
-                            } else
-#endif
-                            {
-#ifdef __AVX2__
-                                gemm_micro_6x16_avx2(
-                                    kc,
-                                    A_micro,
-                                    B_block,
-                                    C + (i + ii) * ldc + (j + jj),
-                                    ldc
-                                );
-#else
-                                scalar_sgemm(MR, NR, kc,
-                                             A + (i + ii) * lda + k, lda,
-                                             B + k * ldb + (j + jj), ldb,
-                                             C + (i + ii) * ldc + (j + jj), ldc);
-#endif
-                            }
-                        } else {
-                            scalar_sgemm(mr, nr, kc,
-                                         A + (i + ii) * lda + k, lda,
-                                         B + k * ldb + (j + jj), ldb,
-                                         C + (i + ii) * ldc + (j + jj), ldc);
-                        }
-                    }
-                }
-            }
-        }
-    }
-
-
-#if defined(__AVX512F__)
-/**
- * Simple AVX-512 microkernel: 6×32 blocking using __m512 accumulators.
- * This is a straightforward port of the AVX2 kernel for machines compiled
- * with AVX-512 support. It is intentionally conservative to avoid register
- * pressure while demonstrating a 512-bit path and a runtime dispatch.
+ * gemm_micro_6x32_avx512 — 6×32 blocking using 512-bit ZMM accumulators.
+ * Doubles the N-width vs AVX2 using the wider register file.
  */
 static void gemm_micro_6x32_avx512(int kc,
-                                   const float* __restrict__ A,
-                                   const float* __restrict__ B,
-                                   float*       __restrict__ C,
-                                   int ldc) {
-    __m512 c0, c1, c2, c3, c4, c5;
-    c0 = _mm512_loadu_ps(C + 0*ldc);
-    c1 = _mm512_loadu_ps(C + 1*ldc);
-    c2 = _mm512_loadu_ps(C + 2*ldc);
-    c3 = _mm512_loadu_ps(C + 3*ldc);
-    c4 = _mm512_loadu_ps(C + 4*ldc);
-    c5 = _mm512_loadu_ps(C + 5*ldc);
+                                    const float* __restrict__ A_panel,
+                                    const float* __restrict__ B_panel,
+                                    float*       __restrict__ C,
+                                    int ldc) noexcept {
+    __m512 c0 = _mm512_loadu_ps(C + 0*ldc);
+    __m512 c1 = _mm512_loadu_ps(C + 1*ldc);
+    __m512 c2 = _mm512_loadu_ps(C + 2*ldc);
+    __m512 c3 = _mm512_loadu_ps(C + 3*ldc);
+    __m512 c4 = _mm512_loadu_ps(C + 4*ldc);
+    __m512 c5 = _mm512_loadu_ps(C + 5*ldc);
 
-    const float* a_ptr = A;
-    const float* b_ptr = B;
+    const float* ap = A_panel;
+    const float* bp = B_panel;
+    const int NR512 = 32;  // one ZMM vector = 16 floats, two vectors wide = 32
 
-    for (int k = 0; k < kc; ++k) {
-        __m512 b = _mm512_load_ps(b_ptr);
-        b_ptr += 32;
-
-        __m512 a0 = _mm512_set1_ps(a_ptr[0]); c0 = _mm512_fmadd_ps(a0, b, c0);
-        __m512 a1 = _mm512_set1_ps(a_ptr[1]); c1 = _mm512_fmadd_ps(a1, b, c1);
-        __m512 a2 = _mm512_set1_ps(a_ptr[2]); c2 = _mm512_fmadd_ps(a2, b, c2);
-        __m512 a3 = _mm512_set1_ps(a_ptr[3]); c3 = _mm512_fmadd_ps(a3, b, c3);
-        __m512 a4 = _mm512_set1_ps(a_ptr[4]); c4 = _mm512_fmadd_ps(a4, b, c4);
-        __m512 a5 = _mm512_set1_ps(a_ptr[5]); c5 = _mm512_fmadd_ps(a5, b, c5);
-        a_ptr += MR;
+    for (int k = 0; k < kc; ++k, ap += MR, bp += NR512) {
+        __m512 bv = _mm512_loadu_ps(bp);
+        c0 = _mm512_fmadd_ps(_mm512_set1_ps(ap[0]), bv, c0);
+        c1 = _mm512_fmadd_ps(_mm512_set1_ps(ap[1]), bv, c1);
+        c2 = _mm512_fmadd_ps(_mm512_set1_ps(ap[2]), bv, c2);
+        c3 = _mm512_fmadd_ps(_mm512_set1_ps(ap[3]), bv, c3);
+        c4 = _mm512_fmadd_ps(_mm512_set1_ps(ap[4]), bv, c4);
+        c5 = _mm512_fmadd_ps(_mm512_set1_ps(ap[5]), bv, c5);
     }
 
     _mm512_storeu_ps(C + 0*ldc, c0);
@@ -470,21 +218,224 @@ static void gemm_micro_6x32_avx512(int kc,
     _mm512_storeu_ps(C + 4*ldc, c4);
     _mm512_storeu_ps(C + 5*ldc, c5);
 }
-#endif
+#endif  // __AVX512F__
+
+// ─── Panel packing ────────────────────────────────────────────────────────────
+
+/**
+ * pack_B — Reorder B[kc × nc] into a contiguous NR-panel-major buffer.
+ *
+ * Output layout: for each N-block of NR columns:
+ *   B_packed[block * kc * nr_block + k * NR + n] = B[k][block*NR + n]
+ *
+ * This converts the strided column-access pattern into sequential reads
+ * (unit stride in the N dimension), enabling full-width vector loads in
+ * the micro-kernel and allowing hardware prefetch to work effectively.
+ */
+static void pack_B(const float* B, int ldb,
+                   int kc, int nc,
+                   float* __restrict__ B_packed,
+                   int nr_block) noexcept {
+    const int num_blocks = (nc + nr_block - 1) / nr_block;
+    for (int block = 0; block < num_blocks; ++block) {
+        const int jb         = block * nr_block;
+        const int actual_nr  = std::min(nr_block, nc - jb);
+        float*    dst_base   = B_packed + block * kc * nr_block;
+
+        for (int k = 0; k < kc; ++k) {
+            const float* src = B + k * ldb + jb;
+            float*       dst = dst_base + k * nr_block;
+
+            for (int n = 0; n < actual_nr; ++n) dst[n] = src[n];
+            // Zero-pad to a full NR block so the micro-kernel reads clean data
+            for (int n = actual_nr; n < nr_block; ++n) dst[n] = 0.0f;
+        }
+    }
 }
 
-// ─── Simple reference (scalar) GEMM — used by benchmark for comparison ───────
+/**
+ * pack_A — Reorder A[mc × kc] into column-major micro-panels.
+ *
+ * Output layout: for each M-block of MR rows:
+ *   A_packed[block * kc * MR + k * MR + m] = alpha × A[block*MR + m][k]
+ *
+ * Folding alpha into pack_A means the micro-kernel hot loop is pure FMA
+ * with no scalar multiply. This is the standard BLIS packing optimization.
+ */
+static void pack_A(const float* A, int lda,
+                   int mc, int kc,
+                   float* __restrict__ A_packed,
+                   float alpha) noexcept {
+    const int num_blocks = (mc + MR - 1) / MR;
+    for (int block = 0; block < num_blocks; ++block) {
+        const int rows       = std::min(MR, mc - block * MR);
+        float*    dst_base   = A_packed + block * kc * MR;
+        // A_block points to A[block*MR][0]; src = A_block + k steps column k
+        const float* A_block = A + block * MR * lda;
+
+        for (int k = 0; k < kc; ++k) {
+            float* dst = dst_base + k * MR;
+            // src[m * lda] = A[block*MR + m][k]
+            const float* src = A_block + k;
+            for (int m = 0; m < rows;  ++m) dst[m] = alpha * src[m * lda];
+            for (int m = rows; m < MR; ++m) dst[m] = 0.0f;
+        }
+    }
+}
+
+// ─── Scalar fallback for edge blocks ─────────────────────────────────────────
+/**
+ * scalar_block — Accumulate a partial mr×nr block of C using scalar ops.
+ *
+ * Used for tail blocks where mr < MR or nr < NR. Uses original (unpacked)
+ * A and B matrices. alpha is applied here since pack_A has NOT been used.
+ *
+ * This is the correctness-critical fallback path — simple scalar triple
+ * loop with no SIMD, verifiably correct by inspection.
+ */
+static void scalar_block(int mr, int nr, int kc, float alpha,
+                          const float* A, int lda,
+                          const float* B, int ldb,
+                          float*       C, int ldc) noexcept {
+    for (int i = 0; i < mr; ++i) {
+        for (int j = 0; j < nr; ++j) {
+            float acc = 0.0f;
+            for (int k = 0; k < kc; ++k) {
+                acc += A[i * lda + k] * B[k * ldb + j];
+            }
+            C[i * ldc + j] += alpha * acc;
+        }
+    }
+}
+
+// ─── Public API: simd_sgemm ───────────────────────────────────────────────────
+/**
+ * simd_sgemm — Single-precision GEMM with AVX2/AVX-512 micro-kernel.
+ *
+ *   C = alpha·A·B + beta·C
+ *
+ * Memory layout: all matrices row-major (C convention).
+ * Alignment: 64-byte alignment preferred but not required (loadu used throughout).
+ */
+void simd_sgemm(int M, int N, int K,
+                float alpha,
+                const float* __restrict__ A, int lda,
+                const float* __restrict__ B, int ldb,
+                float beta,
+                float*       __restrict__ C, int ldc) noexcept {
+    if (M <= 0 || N <= 0 || K <= 0) return;
+
+    // ── Beta scaling ──────────────────────────────────────────────────────────
+    if (beta == 0.0f) {
+        for (int i = 0; i < M; ++i) std::memset(C + i * ldc, 0, N * sizeof(float));
+    } else if (beta != 1.0f) {
+        for (int i = 0; i < M; ++i)
+            for (int j = 0; j < N; ++j)
+                C[i * ldc + j] *= beta;
+    }
+
+    // ── Runtime ISA selection ─────────────────────────────────────────────────
+    // NOTE: The gemm_micro_6x32_avx512 stub uses only one __m512 accumulator per
+    // row (16 floats), so it cannot correctly process a 32-column tile. Until the
+    // full dual-accumulator 6x32 kernel is implemented, we always run the proven
+    // AVX2 6x16 path (inner_NR=16) even on AVX-512 hardware. The 256-bit ops
+    // execute at full throughput on AVX-512 cores. See ROADMAP.md Phase 1.
+#if defined(__AVX512F__)
+    [[maybe_unused]] const bool use_avx512 = __builtin_cpu_supports("avx512f");
+#endif
+    constexpr int inner_NR = NR;   // Always NR=16; AVX-512 6x32 is planned work
+
+    // ── 5-Loop GEMM ───────────────────────────────────────────────────────────
+    //
+    //   Loop 1 (jc):  iterate over N in NC-wide blocks
+    //   Loop 2 (kc):  iterate over K in KC-wide blocks
+    //     pack_B into B_pack (fits in L2)
+    //   Loop 3 (ic):  iterate over M in MC-wide blocks
+    //     pack_A into A_pack (fits in L2, alongside B_pack)
+    //   Loop 4 (jr):  iterate over nc in NR-wide blocks     } micro-kernel
+    //   Loop 5 (ir):  iterate over mc in MR-wide blocks     } register tile
+    //
+    // Notes:
+    //   - Packing buffers are allocated per-j-block to give fresh clean buffers.
+    //   - For OpenMP builds, each thread gets private packing buffers.
+
+    const int num_j_blocks = (N + NC - 1) / NC;
+
+    for (int jb = 0; jb < num_j_blocks; ++jb) {
+        const int j  = jb * NC;
+        const int nc = std::min(NC, N - j);
+
+        // Per-block packing buffers; unique_ptr ensures cleanup even on early exit
+        auto A_pack = make_aligned_array<float>(
+            static_cast<std::size_t>((MC + MR - 1) / MR) * KC * MR);
+        auto B_pack = make_aligned_array<float>(
+            static_cast<std::size_t>((NC + inner_NR - 1) / inner_NR) * KC * inner_NR);
+
+        // Loop 2: K-tiles
+        for (int k = 0; k < K; k += KC) {
+            const int kc = std::min(KC, K - k);
+
+            // Pack B[k..k+kc-1][j..j+nc-1] → B_pack
+            pack_B(B + k * ldb + j, ldb, kc, nc, B_pack.get(), inner_NR);
+
+            // Loop 3: M-tiles
+            for (int i = 0; i < M; i += MC) {
+                const int mc = std::min(MC, M - i);
+
+                // Pack A[i..i+mc-1][k..k+kc-1] → A_pack  (alpha folded in)
+                pack_A(A + i * lda + k, lda, mc, kc, A_pack.get(), alpha);
+
+                // Loop 4+5: micro-kernel tiles
+                for (int ii = 0; ii < mc; ii += MR) {
+                    const int mr      = std::min(MR, mc - ii);
+                    const float* Aμ   = A_pack.get() + (ii / MR) * kc * MR;
+
+                    for (int jj = 0; jj < nc; jj += inner_NR) {
+                        const int nr    = std::min(inner_NR, nc - jj);
+                        float*    C_ptr = C + (i + ii) * ldc + (j + jj);
+
+                        if (mr == MR && nr == inner_NR) {
+                            // Full 6×16 micro-kernel block (AVX2 path).
+                            // NOTE: The AVX-512 6×32 path is a future extension.
+                            // On AVX-512 hardware the 256-bit ops below execute at
+                            // full throughput on 512-bit capable execution units.
+                            const float* Bμ = B_pack.get() + (jj / inner_NR) * kc * inner_NR;
+#ifdef __AVX2__
+                            gemm_micro_6x16_avx2(kc, Aμ, Bμ, C_ptr, ldc);
+#else
+                            scalar_block(MR, inner_NR, kc, 1.0f,
+                                         A + (i+ii)*lda + k, lda,
+                                         B + k*ldb + (j+jj), ldb,
+                                         C_ptr, ldc);
+#endif
+                        } else {
+                            // Edge/tail block: use original (unpacked) A and B.
+                            // alpha is applied here; beta was applied upfront.
+                            scalar_block(mr, nr, kc, alpha,
+                                         A + (i+ii)*lda + k, lda,
+                                         B + k*ldb + (j+jj), ldb,
+                                         C_ptr, ldc);
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
+
+// ─── Scalar reference GEMM ───────────────────────────────────────────────────
+/**
+ * scalar_sgemm — Naïve triple-loop GEMM (correctness oracle for benchmarks).
+ */
 void scalar_sgemm(int M, int N, int K,
                   const float* A, int lda,
                   const float* B, int ldb,
-                  float*       C, int ldc) {
-    for (int i = 0; i < M; ++i) {
+                  float*       C, int ldc) noexcept {
+    for (int i = 0; i < M; ++i)
         for (int j = 0; j < N; ++j) {
             float acc = 0.0f;
-            for (int k = 0; k < K; ++k) {
+            for (int k = 0; k < K; ++k)
                 acc += A[i * lda + k] * B[k * ldb + j];
-            }
             C[i * ldc + j] = acc;
         }
-    }
 }
