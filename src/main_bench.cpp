@@ -319,25 +319,27 @@ static void bench_gelu(std::vector<BenchmarkRecord>& records,
     for (int n : sizes) {
         auto input  = make_aligned_array<float>(n);
         auto out_simd   = make_aligned_array<float>(n);
-        auto out_scalar = make_aligned_array<float>(n);
+        auto out_erff   = make_aligned_array<float>(n);
+
+        // Use element-count × 15 as FP-ops proxy (each GeLU element ~15 FMA ops)
+        long long ops = 15LL * n;
 
         for (int i = 0; i < n; ++i) input[i] = (float)(i % 100) * 0.05f - 2.5f;
 
-        char label_simd[64], label_scalar[64];
-        snprintf(label_simd,   sizeof(label_simd),   "AVX2  GeLU n=%7d", n);
-        snprintf(label_scalar, sizeof(label_scalar),  "Scalar GeLU n=%7d", n);
+        char label_simd[64], label_erff[64];
+        snprintf(label_simd, sizeof(label_simd), "AVX2  GeLU n=%7d", n);
+        snprintf(label_erff, sizeof(label_erff), "erff  GeLU n=%7d", n);
 
-        // Use element-count as "flops" proxy (each element ~15 FMA ops)
-        long long ops = 15LL * n;
-
-        BenchmarkRecord scalar_record{};
-        scalar_record.category = "activations";
-        scalar_record.name = label_scalar;
-        scalar_record.n = n;
-        measure(label_scalar,
-                [&]() { gelu_forward_scalar(input.get(), out_scalar.get(), n); },
-                ops, warmup, reps, &scalar_record);
-        records.push_back(std::move(scalar_record));
+        // erff-exact baseline: GeLU(x) = 0.5*x*(1 + erf(x/√2))
+        // Slower than AVX2 tanh path (~10×); included as a timing reference.
+        BenchmarkRecord erff_record{};
+        erff_record.category = "activations";
+        erff_record.name = label_erff;
+        erff_record.n = n;
+        measure(label_erff,
+                [&]() { gelu_forward_scalar(input.get(), out_erff.get(), n); },
+                ops, warmup, reps, &erff_record);
+        records.push_back(std::move(erff_record));
 
         BenchmarkRecord simd_record{};
         simd_record.category = "activations";
@@ -348,15 +350,27 @@ static void bench_gelu(std::vector<BenchmarkRecord>& records,
                 ops, warmup, reps, &simd_record);
         records.push_back(std::move(simd_record));
 
-        // Numerical accuracy check: max relative error
+        // Numerical accuracy check: compare SIMD path vs tanh-formula reference.
+        //
+        // NOTE: gelu_forward_avx2 (tanh approximation) and gelu_forward_scalar
+        // (exact erff path) implement DIFFERENT mathematical formulas; the inherent
+        // difference between them is ~5e-4 at x≈±2.7, not an implementation error.
+        // Here we compute the tanh-formula in double precision as the honest reference
+        // for the SIMD kernel — this tests the Cody–Waite exp accuracy, not the
+        // choice of GeLU formula.
+        constexpr double SQRT2OVERPI = 0.7978845608028654;
+        constexpr double COEFF       = 0.044715;
         double max_err = 0.0;
         for (int i = 0; i < n; ++i) {
-            double ref = out_scalar[i];
-            double got = out_simd[i];
-            double err = std::abs(ref - got) / (std::abs(ref) + 1e-7);
+            double x     = static_cast<double>(input[i]);
+            double inner = SQRT2OVERPI * (x + COEFF * x * x * x);
+            double ref   = 0.5 * x * (1.0 + std::tanh(inner));   // tanh-formula reference
+            double got   = static_cast<double>(out_simd[i]);
+            double err   = std::abs(got - ref) / (std::abs(ref) + 1e-7);
             if (err > max_err) max_err = err;
         }
-        printf("    Max relative error (SIMD vs scalar): %.2e\n", max_err);
+        printf("    Max relative error (SIMD vs tanh-formula ref): %.2e  %s\n",
+               max_err, max_err < 1e-5 ? "OK" : "WARN");
     }
 }
 
