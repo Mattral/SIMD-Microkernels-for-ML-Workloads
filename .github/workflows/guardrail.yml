@@ -1,0 +1,109 @@
+name: Security and Code Quality
+
+on:
+  push:
+    branches: [main, master]
+  pull_request:
+    branches: [main, master]
+  schedule:
+    - cron: '0 3 * * 1'   # Weekly Monday 3 AM UTC
+
+jobs:
+  # ─── Static analysis: clang-tidy ────────────────────────────────────────────
+  clang-tidy:
+    name: clang-tidy static analysis
+    runs-on: ubuntu-22.04
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install dependencies
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y cmake ninja-build clang-15 clang-tidy-15 \
+            python3-dev python3-pip
+          pip3 install pybind11[global] numpy
+
+      - name: Generate compile_commands.json
+        run: |
+          cmake -S . -B build_tidy -G Ninja \
+            -DCMAKE_BUILD_TYPE=Release \
+            -DCMAKE_CXX_COMPILER=clang++-15 \
+            -DCMAKE_EXPORT_COMPILE_COMMANDS=ON
+
+      - name: Run clang-tidy on kernel sources
+        run: |
+          # Focus on kernel sources; exclude vendored/generated headers
+          FILES=$(find src/kernels src/dispatch -name "*.cpp" | tr '\n' ' ')
+          clang-tidy-15 \
+            -p build_tidy \
+            --checks='bugprone-*,cppcoreguidelines-*,modernize-*,performance-*,portability-*,readability-*,-modernize-use-trailing-return-type,-cppcoreguidelines-avoid-magic-numbers,-readability-magic-numbers' \
+            --warnings-as-errors='' \
+            $FILES \
+            -- -I src/kernels -I src \
+            2>&1 | tee clang_tidy_report.txt || true
+          # Fail if real errors (not warnings) found
+          if grep -E "^.*: error:" clang_tidy_report.txt; then
+            echo "clang-tidy found errors"
+            exit 1
+          fi
+          echo "clang-tidy: no errors found"
+
+  # ─── Dependency vulnerability scan: pip-audit ───────────────────────────────
+  dependency-audit:
+    name: Python dependency vulnerability scan
+    runs-on: ubuntu-22.04
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install pip-audit
+        run: pip install pip-audit
+
+      - name: Audit Python dependencies
+        run: |
+          pip-audit --requirement <(echo "numpy>=1.24
+          pytest
+          scipy") || true   # Advisory only — don't block on unfixable transitive vulns
+
+  # ─── Spell check documentation ───────────────────────────────────────────────
+  spell-check:
+    name: Documentation spell check
+    runs-on: ubuntu-22.04
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install codespell
+        run: pip install codespell
+
+      - name: Run codespell on docs and source
+        run: |
+          codespell \
+            --skip="*.json,*.lock,*.pyc,build,*.egg-info,.git" \
+            --ignore-words-list="TE,ths,nin,fo,ans" \
+            docs/ src/ tests/ README.md \
+            2>&1 | tee codespell_report.txt || true
+          if [ -s codespell_report.txt ]; then
+            echo "codespell found potential misspellings (advisory):"
+            cat codespell_report.txt
+          else
+            echo "codespell: no issues found"
+          fi
+
+  # ─── License header check ────────────────────────────────────────────────────
+  license-check:
+    name: License header compliance
+    runs-on: ubuntu-22.04
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Check for Apache 2.0 license file
+        run: |
+          if [ ! -f LICENSE ]; then
+            echo "ERROR: LICENSE file missing"
+            exit 1
+          fi
+          if ! grep -q "Apache License" LICENSE; then
+            echo "ERROR: LICENSE file does not contain Apache License header"
+            exit 1
+          fi
+          echo "LICENSE file: OK"
+          echo "Source file count: $(find src/ -name '*.cpp' -o -name '*.hpp' | wc -l)"
