@@ -1,52 +1,116 @@
-# Security
+# Security Considerations
 
-This repository is a native C++ project with Python bindings. Security considerations are focused on safe memory handling, dependency hygiene, and build integrity.
+---
 
-## Native code safety
+## Threat Model
 
-* SIMD kernels use raw pointers and aligned memory.
-* The code should be audited for out-of-bounds accesses when modifying block loops.
-* Undefined behavior in C++ can lead to memory corruption and must be avoided.
+IntrinsicML is a CPU microkernel library intended for use in research,
+benchmarking, and production ML inference pipelines. It is **not** a
+network-facing service or a security boundary. The threat model covers:
 
-Recommended mitigation:
+- **Memory safety** in native C++ kernel code
+- **Input validation** at the Python binding layer
+- **Dependency hygiene** for the build system and runtime dependencies
+- **Supply-chain integrity** for CI/CD artifacts
 
-* Use sanitizers during development (`-fsanitize=address,undefined`).
-* Run unit tests and fuzz edge cases for matrix dimension handling.
-* Validate pointer lifetimes when exposing buffers to Python.
+---
 
-## Python bindings
+## Native Code Safety
 
-The `pybind11` wrapper exposes native functions to Python.
+### What the kernels do
 
-* Inputs are validated for shape and type before dispatch.
-* Output arrays are allocated with the correct size when `C=None`.
-* The wrapper avoids unnecessary copies where possible.
+All kernels operate on contiguous float32 arrays via raw pointers. The inner
+loops access memory in a predictable strided pattern bounded by the caller-supplied
+dimensions M, N, K, n.
 
-Recommended mitigation:
+### Validation layer
 
-* Keep the binding layer minimal and avoid complex reference lifetimes.
-* Audit `pybind11` usage for any conversion or buffer protocol assumptions.
+**All dimension and type validation happens in `pybind_entry.cpp`** before any
+pointer is passed to a kernel:
 
-## Dependency hygiene
+```cpp
+// Validated before calling any C++ kernel:
+// 1. dtype == float32 (not float64, int, etc.)
+// 2. ndim matches expected (e.g., sgemm requires 2-D inputs)
+// 3. C-contiguous memory layout
+// 4. Writeable flag for in-place operations
+// 5. Shape compatibility (K-dimension match for GEMM)
+// 6. Gamma/beta size matching last dimension for layer_norm
+```
 
-Third-party dependencies are minimal:
+A malformed Python call raises a `RuntimeError` with a descriptive message
+before touching any native memory.
 
-* `pybind11` for Python bindings
-* CMake and the host toolchain for building
+### Size bounds and overflow
 
-Recommended mitigation:
+All tile-loop bounds are derived from caller-supplied dimensions (M, N, K ≥ 0).
+The guards `if (M <= 0 || N <= 0 || K <= 0) return;` in both GEMM entry points
+prevent zero or negative sizes from reaching the inner loops.
 
-* Pin tooling versions in documentation or CI workflows.
-* Verify package sources if using system package managers or pip.
-* Use reproducible build environments where possible.
+Large inputs (e.g., M=N=K=1,000,000) would require 4 TB of FP32 storage —
+the OS will refuse the allocation and a `std::bad_alloc` exception propagates
+cleanly to Python as a `MemoryError`.
 
-## Supply chain and build integrity
+### Recommended mitigations for contributors
 
-* Prefer a known compiler/toolchain for release builds.
-* Validate build artifacts using code review and trusted OS packages.
-* Do not run untrusted binaries in privileged environments.
+```bash
+# Build with AddressSanitizer + UndefinedBehaviorSanitizer:
+cmake -S . -B build_asan -DSIMD_ML_SANITIZE=ON -DCMAKE_CXX_COMPILER=clang++-15
+cmake --build build_asan
+ctest --test-dir build_asan
 
-## Operational guidance
+# Run the static analysis workflow locally:
+clang-tidy-15 -p build_asan src/kernels/*.cpp src/kernels/activations/*.cpp \
+    src/kernels/gemm/*.cpp
+```
 
-This project is intended for experimentation and benchmarking, not as a secure production runtime.
-For production use, a hardened native library should include additional controls such as sandboxing, explicit memory ownership models, and platform-specific mitigations.
+---
+
+## Python Binding Safety
+
+### GIL release
+
+All kernel calls release the GIL (`py::gil_scoped_release`). This enables
+concurrent Python threads but means kernel execution is non-interruptible from
+Python during the call. This is safe because:
+- Kernels are pure compute (no Python API calls during execution)
+- Inputs are validated before GIL release
+- No shared mutable state between concurrent kernel calls
+
+### Buffer aliasing
+
+`gelu_forward_avx2` explicitly supports in-place operation (`input == output`).
+Other kernels use separate input/output pointers; aliased in/out pointers
+would cause undefined behaviour and are guarded by the `__restrict__` qualifier
+on the C++ side and the `writeable` flag check on the Python side.
+
+---
+
+## Dependency Hygiene
+
+**Runtime dependencies** (minimal by design):
+
+| Dependency | Version | Notes |
+|---|---|---|
+| `numpy` | ≥ 1.24 | Runtime; NumPy's own security policy applies |
+| `pybind11` | ≥ 2.11 | Build-time only; not bundled in the wheel |
+
+**No internet access at runtime.** The library is self-contained once installed.
+
+**For contributors**: pin build toolchains in CI and the Dockerfile to avoid
+silent upstream changes. The weekly `guardrail.yml` workflow runs `pip-audit`
+to check for known vulnerabilities in Python dependencies.
+
+---
+
+## Supply-Chain Integrity
+
+- All CI/CD workflows are defined in `.github/workflows/` and reviewed on every PR
+- `FetchContent` in CMakeLists.txt downloads doctest at a pinned tag (`v2.4.12`) via HTTPS
+- The Docker image pins GCC, Python, CMake, pybind11, numpy, and pytest versions
+- Release artifacts are built from clean CI runs on trusted GitHub-hosted runners
+
+**Not yet implemented** (planned for v1.0):
+- Signed releases (GPG or GitHub Attestations)
+- SBOM (Software Bill of Materials) generation
+- Reproducible builds (currently `--build-timestamp` embeds wall-clock time)
