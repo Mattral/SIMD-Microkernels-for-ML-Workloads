@@ -2,75 +2,99 @@ name: Build and Test
 
 on:
   push:
-    branches: [main]
+    branches: [main, master]
   pull_request:
-    branches: [main]
+    branches: [main, master]
 
 jobs:
-  build-linux-avx2:
-    name: Linux / GCC / AVX2
+  # ─── Primary: Linux GCC, AVX2, with OpenBLAS baseline ──────────────────────
+  build-linux-gcc:
+    name: Linux / GCC-12 / AVX2 + OpenBLAS
     runs-on: ubuntu-22.04
     steps:
       - uses: actions/checkout@v4
-      - name: Install dependencies
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y cmake ninja-build libpybind11-dev \
-            python3-dev python3-pip clang-15 libopenblas-dev
-          pip install pytest numpy
 
-      - name: Configure (Release, AVX2, with OpenBLAS comparison)
+      - name: Install system dependencies
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y cmake ninja-build g++-12 \
+            python3-dev python3-pip libopenblas-dev
+          pip3 install pybind11[global] numpy pytest scipy
+
+      - name: Configure (Release, OpenBLAS enabled)
+        env:
+          CC: gcc-12
+          CXX: g++-12
         run: |
           cmake -S . -B build -G Ninja \
             -DCMAKE_BUILD_TYPE=Release \
-            -DCMAKE_CXX_COMPILER=g++ \
-            -DBENCH_OPENBLAS=ON \
-            -DSIMD_ML_OPENMP=ON
+            -DCMAKE_C_COMPILER=gcc-12 \
+            -DCMAKE_CXX_COMPILER=g++-12 \
+            -DBENCH_OPENBLAS=ON
 
-      - name: Build
+      - name: Build all targets
         run: cmake --build build --parallel
 
-      - name: Run C++ unit tests (Release)
-        run: ctest --test-dir build -R unit_tests_release --output-on-failure
+      - name: Run C++ tests
+        run: ctest --test-dir build --output-on-failure --parallel 4
+
+      - name: Verify Python extension loads
+        run: |
+          pip3 install -e . --no-build-isolation -q
+          python3 -c "
+          import simd_kernels, numpy as np
+          A = np.random.randn(32, 32).astype(np.float32)
+          C = simd_kernels.sgemm(A, A.T)
+          x = np.random.randn(1024).astype(np.float32)
+          y = simd_kernels.gelu(x)
+          y = simd_kernels.layer_norm(x)
+          print('Python extension smoke test: PASS')
+          print(simd_kernels.build_info())
+          "
 
       - name: Run Python precision tests
-        run: |
-          pip install -e .
-          pytest tests/python/ -v
+        run: pytest tests/test_precision.py tests/test_bindings_edge_cases.py -v --tb=short
 
+  # ─── Secondary: Clang-15 with ASan/UBSan ───────────────────────────────────
   build-linux-asan:
-    name: Linux / Clang / ASan + UBSan
+    name: Linux / Clang-15 / ASan + UBSan
     runs-on: ubuntu-22.04
     steps:
       - uses: actions/checkout@v4
-      - name: Install
-        run: sudo apt-get install -y cmake ninja-build clang-15 libpybind11-dev python3-dev
 
-      - name: Configure (ASAN)
+      - name: Install dependencies
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y cmake ninja-build clang-15 python3-dev python3-pip
+          pip3 install pybind11[global] numpy
+
+      - name: Configure (RelWithDebInfo, sanitizers enabled)
         run: |
           cmake -S . -B build_asan -G Ninja \
             -DCMAKE_BUILD_TYPE=RelWithDebInfo \
-            -DCMAKE_CXX_COMPILER=clang++-15
+            -DCMAKE_CXX_COMPILER=clang++-15 \
+            -DSIMD_ML_SANITIZE=ON
 
-      - name: Build ASAN target
-        run: cmake --build build_asan --target tests_asan
+      - name: Build
+        run: cmake --build build_asan --parallel
 
-      - name: Run ASAN tests
+      - name: Run ASan/UBSan tests
         run: |
           ASAN_OPTIONS=detect_leaks=1:abort_on_error=1 \
-          UBSAN_OPTIONS=print_stacktrace=1 \
-          ctest --test-dir build_asan -R unit_tests_asan --output-on-failure
+          UBSAN_OPTIONS=print_stacktrace=1:halt_on_error=1 \
+          ctest --test-dir build_asan --output-on-failure --parallel 1
 
+  # ─── macOS: Apple Clang, scalar fallback path ───────────────────────────────
   build-macos:
     name: macOS / Apple Clang / Scalar fallback
-    runs-on: macos-14   # Apple Silicon — no AVX2
+    runs-on: macos-14   # Apple Silicon (ARM) — no AVX2; tests scalar fallback
     steps:
       - uses: actions/checkout@v4
-      - run: brew install cmake pybind11
-      - name: Configure
-        run: cmake -S . -B build -DCMAKE_BUILD_TYPE=Release
+      - name: Install CMake and pybind11
+        run: brew install cmake ninja pybind11
+      - name: Configure (scalar build — no AVX2 flags)
+        run: cmake -S . -B build -G Ninja -DCMAKE_BUILD_TYPE=Release
       - name: Build
         run: cmake --build build --parallel
       - name: Test (scalar fallback path)
         run: ctest --test-dir build --output-on-failure
-        # On ARM, dispatcher must select scalar fallback — test this explicitly
