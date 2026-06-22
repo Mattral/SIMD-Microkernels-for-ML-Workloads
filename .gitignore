@@ -1,3 +1,92 @@
+# ─── Build outputs ────────────────────────────────────────────────────────────
 /build/
-/build*/
+/build_ci/
+/build_asan/
+/build_release/
 /out/
+/dist/
+CMakeFiles/
+CMakeCache.txt
+cmake_install.cmake
+Makefile
+*.cmake
+!CMakeLists.txt
+
+# ─── Compiled Python extension ────────────────────────────────────────────────
+*.so
+*.pyd
+*.dylib
+simd_kernels*.so
+simd_kernels*.pyd
+
+# ─── Python cache and packaging ───────────────────────────────────────────────
+__pycache__/
+*.py[cod]
+*$py.class
+*.egg-info/
+*.egg
+.eggs/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+pip-wheel-metadata/
+MANIFEST
+
+# ─── Benchmark output files ───────────────────────────────────────────────────
+# Keep the committed baseline; ignore transient CI outputs
+benchmarks/results/ci_*.json
+benchmarks/results/bench_rdtsc.json
+benchmarks/results/bench_stat.json
+# Keep: benchmarks/results/gemm_results.json  (committed baseline)
+
+# ─── Editor and OS files ──────────────────────────────────────────────────────
+.DS_Store
+.DS_Store?
+._*
+.Spotlight-V100
+.Trashes
+ehthumbs.db
+Thumbs.db
+*.swp
+*.swo
+*~
+.vscode/
+.idea/
+*.iml
+*.sublime-workspace
+*.sublime-project
+
+# ─── Profiling and debugging artifacts ───────────────────────────────────────
+perf.data
+perf.data.old
+callgrind.out.*
+massif.out.*
+gmon.out
+*.prof
+
+# ─── Compiler-generated intermediates ────────────────────────────────────────
+*.o
+*.a
+*.lib
+*.d
+*.gcno
+*.gcda
+*.gcov
+
+# ─── Jupyter notebooks (if any) ───────────────────────────────────────────────
+.ipynb_checkpoints/
+
+# ─── Environment files ────────────────────────────────────────────────────────
+.env
+.envrc
+venv/
+.venv/
+env/
+
+# ─── Docker ───────────────────────────────────────────────────────────────────
+# Keep: Dockerfile
+.dockerignore
+
+# ─── Logs ────────────────────────────────────────────────────────────────────
+*.log
+*.txt.bak
