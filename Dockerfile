@@ -1,49 +1,100 @@
+# ─── IntrinsicML — Reproducible Development & Benchmark Environment ──────────
+#
+# Provides a pinned, reproducible environment for building, testing, and
+# benchmarking IntrinsicML with GCC-12, CMake ≥ 3.22, pybind11, and OpenBLAS.
+#
+# Build:
+#   docker build -t intrinsicml .
+#
+# Run tests:
+#   docker run --rm intrinsicml
+#
+# Run benchmarks (statistical harness):
+#   docker run --rm intrinsicml ./build/bench_stat --reps 30 --sizes 64,128,256,512
+#
+# Run Python benchmark:
+#   docker run --rm intrinsicml python3 tests/test_bench.py --no-plot
+#
+# Interactive shell:
+#   docker run --rm -it intrinsicml bash
+
 FROM ubuntu:22.04
 
 LABEL maintainer="Min Htet Myet"
-LABEL description="IntrinsicML SIMD microkernel development environment"
+LABEL description="IntrinsicML SIMD microkernel — build, test, and benchmark environment"
+LABEL org.opencontainers.image.source="https://github.com/Mattral/SIMD-Microkernels-for-ML-Workloads"
 
-ARG GCC_VERSION=12
-ARG CMAKE_VERSION=3.28.0
-
-# Prevent interactive prompts
+# Prevent interactive apt prompts
 ENV DEBIAN_FRONTEND=noninteractive
 
-# Pin all package versions
+# ─── System packages ──────────────────────────────────────────────────────────
+# gcc-12 / g++-12: C++17 with AVX2/FMA support on Ubuntu 22.04
+# cmake: ≥ 3.22 required by CMakeLists.txt (FetchContent + CheckCXXCompilerFlag)
+# libopenblas-dev: OpenBLAS headers and library for bench_stat baseline comparison
+# numactl: provides `numactl --physcpubind` for core pinning in benchmarks
+# python3-dev / python3-pip: for pybind11 extension build
+# ninja-build: faster parallel builds
 RUN apt-get update && apt-get install -y --no-install-recommends \
-    gcc-${GCC_VERSION}=12.3.0-1ubuntu1~22.04 \
-    g++-${GCC_VERSION}=12.3.0-1ubuntu1~22.04 \
-    python3.11=3.11.0~rc1-1~22.04 \
-    python3.11-dev=3.11.0~rc1-1~22.04 \
-    python3-pip \
+    gcc-12 \
+    g++-12 \
+    cmake \
     ninja-build \
+    python3-dev \
+    python3-pip \
     libopenblas-dev \
     numactl \
-    linux-tools-generic \     # for perf
     && rm -rf /var/lib/apt/lists/*
 
-# Install exact CMake version
-RUN pip install cmake==${CMAKE_VERSION}
+# Ensure gcc-12 / g++-12 are the default compilers
+RUN update-alternatives --install /usr/bin/gcc gcc /usr/bin/gcc-12 100 \
+    && update-alternatives --install /usr/bin/g++ g++ /usr/bin/g++-12 100 \
+    && update-alternatives --install /usr/bin/cc  cc  /usr/bin/gcc-12 100 \
+    && update-alternatives --install /usr/bin/c++ c++ /usr/bin/g++-12 100
 
-# pybind11 via pip (version-pinned)
-RUN pip install pybind11==2.11.1 numpy==1.26.0 pytest==7.4.0
+# ─── Python dependencies ──────────────────────────────────────────────────────
+# pybind11[global]: installs pybind11 CMake support in a location CMake can find
+# scikit-build-core: build backend for the Python extension (pyproject.toml)
+# numpy: runtime dependency of simd_kernels Python bindings
+# scipy: used in test_precision.py for numerical reference comparisons
+# pytest: test runner
+RUN pip install --no-cache-dir \
+    "pybind11[global]>=2.11" \
+    "scikit-build-core>=0.6" \
+    "numpy>=1.24" \
+    "scipy>=1.11" \
+    "pytest>=7.4"
 
-# Set GCC as default
-RUN update-alternatives --install /usr/bin/gcc gcc /usr/bin/gcc-${GCC_VERSION} 100 \
-    && update-alternatives --install /usr/bin/g++ g++ /usr/bin/g++-${GCC_VERSION} 100
-
+# ─── Build the project ────────────────────────────────────────────────────────
 WORKDIR /workspace
 COPY . .
 
-# Build with all features
 RUN cmake -S . -B build -G Ninja \
     -DCMAKE_BUILD_TYPE=Release \
-    -DSIMD_ML_OPENMP=ON \
+    -DCMAKE_C_COMPILER=gcc-12 \
+    -DCMAKE_CXX_COMPILER=g++-12 \
+    -DSIMD_ML_OPENMP=OFF \
     -DBENCH_OPENBLAS=ON \
     && cmake --build build --parallel
 
-# Default: run tests
-CMD ["ctest", "--test-dir", "build", "--output-on-failure"]
+# Build and install Python extension
+RUN pip install --no-cache-dir -e . --no-build-isolation
 
-# To run benchmarks:
-# docker run --rm intrinsicml bash benchmarks/run_suite.sh
+# ─── Default command: run C++ test suite ─────────────────────────────────────
+CMD ["ctest", "--test-dir", "build", "--output-on-failure", "--parallel", "4"]
+
+# ─── Common usage examples ────────────────────────────────────────────────────
+# Run C++ tests:
+#   docker run --rm intrinsicml
+#
+# Run RDTSC cycle-accurate bench:
+#   docker run --rm intrinsicml ./build/bench
+#
+# Run statistical bench (JSON output):
+#   docker run --rm intrinsicml ./build/bench_stat \
+#       --reps 30 --sizes 64,128,256,512 --output /tmp/results.json
+#
+# Run Python precision tests:
+#   docker run --rm intrinsicml pytest tests/test_precision.py -v
+#
+# Run Python benchmark:
+#   docker run --rm intrinsicml python3 tests/test_bench.py --no-plot --quick
