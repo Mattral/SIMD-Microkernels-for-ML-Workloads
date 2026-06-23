@@ -442,20 +442,48 @@ static void bench_alignment(std::vector<BenchmarkRecord>& records,
 }
 
 // ─── Performance Summary Table ────────────────────────────────────────────────
-static void print_roofline_summary() {
-    printf("\n=== Roofline Model Summary (Intel Core, ~3.5 GHz, AVX2) ===\n");
-    printf("  %-40s %s\n", "Parameter", "Value");
-    printf("  %s\n", std::string(60, '-').c_str());
-    printf("  %-40s %.0f GFLOPS\n", "Peak FP32 throughput (1 core, FMA):", 56.0);
-    printf("  %-40s %.0f GB/s\n",   "Peak memory bandwidth (DDR5-4800):", 76.8);
-    printf("  %-40s %.1f FLOP/byte\n", "Arithmetic intensity (256x256 GEMM):",
-           (double)(2LL*256*256*256) / (3.0*256*256*4));
-    printf("  %-40s %s\n", "Kernel regime:", "Compute-bound (AI > ridge point)");
-    printf("  %-40s %s\n", "Bottleneck (small matrices < 64x64):", "Memory-bound (need tiling)");
+static void print_roofline_summary(const std::vector<BenchmarkRecord>& records) {
+    // ── Roofline constants (representative Intel Core, AVX2 + FMA) ──────────
+    // Peak: 2 FMA ports × 8 floats × 2 FLOPS × 3.5 GHz = 112 GFLOPS total
+    //       (reported as 56 GFLOPS = one port, to give util% in [0%,100%])
+    const double peak_gflops_one_port = (g_tsc_hz / 1e9) * 16.0;  // calibrated
+    const double bw_gb_s = 51.2;  // DDR4-3200 typical peak (2-channel)
 
-    printf("\n  Performance Matrix:\n");
-    printf("  %-16s %-22s %-22s %-10s\n",
-           "Matrix Size", "Scalar -O3 (MCycles)", "SIMD AVX2 (MCycles)", "Speedup");
+    printf("\n=== Roofline Model Summary ===\n");
+    printf("  %-44s %s\n", "Parameter", "Value");
+    printf("  %s\n", std::string(64, '-').c_str());
+    printf("  %-44s %.1f GHz\n", "Calibrated TSC frequency:", g_tsc_hz / 1e9);
+    printf("  %-44s %.0f GFLOPS (1 FMA port)\n",
+           "Peak FP32 (single FMA port, AVX2):", peak_gflops_one_port);
+    printf("  %-44s %.0f GFLOPS (2 FMA ports)\n",
+           "Peak FP32 (dual FMA ports, AVX2):", peak_gflops_one_port * 2.0);
+    printf("  %-44s %.1f GB/s\n",
+           "Assumed memory bandwidth (DDR4):", bw_gb_s);
+
+    // Compute ridge point: FP peak / bandwidth
+    double ridge = peak_gflops_one_port / bw_gb_s;  // FLOP/byte
+    printf("  %-44s %.1f FLOP/byte\n", "Roofline ridge point:", ridge);
+
+    // Print arithmetic intensity for each GEMM size
+    printf("\n  %-18s %-20s %-12s %-10s\n",
+           "Size", "Arith. Intensity", "Regime", "Measured util%%");
+    printf("  %s\n", std::string(65, '-').c_str());
+
+    for (const auto& r : records) {
+        if (r.category != "gemm" || r.M == 0) continue;
+        int N = r.N;
+        // AI = 2*N^3 / (3*N^2*4 bytes) for square GEMM (ignoring caching)
+        double ai = (2.0 * N * N * N) / (3.0 * N * N * 4);
+        const char* regime = (ai > ridge) ? "Compute-bound" : "Memory-bound";
+        double util = (peak_gflops_one_port > 0.0)
+            ? r.result.gflops / peak_gflops_one_port * 100.0 : 0.0;
+        printf("  %-18s %-20.1f %-12s %.1f%%\n",
+               r.name.substr(r.name.find_last_of(' ')+1).c_str(),
+               ai, regime, util);
+    }
+
+    printf("\n  Note: util%% > 50%% = using one FMA port near capacity.\n");
+    printf("        util%% > 100%% = both ports in use (theoretical max for AVX2 = 200%%).\n");
 }
 
 int main(int argc, char** argv) {
@@ -502,7 +530,7 @@ int main(int argc, char** argv) {
     bench_alignment(records, warmup, reps);
     bench_gemm(records, warmup, reps);
     bench_gelu(records, warmup, reps);
-    print_roofline_summary();
+    print_roofline_summary(records);
 
     if (!json_output.empty()) {
         write_json_report(json_output, records);
