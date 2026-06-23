@@ -65,7 +65,6 @@ static inline __m256 fast_exp_avx2(__m256 z) {
     const __m256 ln2_hi   = _mm256_set1_ps(0.693359375f);           // high bits of ln(2)
     const __m256 ln2_lo   = _mm256_set1_ps(-2.12194440e-4f);        // low bits of ln(2)
     const __m256 half     = _mm256_set1_ps(0.5f);
-    const __m256 one      = _mm256_set1_ps(1.0f);
     // float32 exp range: clamp outside [-88.37, 88.37] to prevent Inf/NaN
     const __m256 max_exp  = _mm256_set1_ps(88.3762626647949f);
     const __m256 min_exp  = _mm256_set1_ps(-88.3762626647949f);
@@ -78,8 +77,7 @@ static inline __m256 fast_exp_avx2(__m256 z) {
     const __m256 c5 = _mm256_set1_ps(8.3338161260e-3f);
     const __m256 c4 = _mm256_set1_ps(4.1666668259e-2f);
     const __m256 c3 = _mm256_set1_ps(1.6666667163e-1f);
-    const __m256 c2 = _mm256_set1_ps(5.0f);         // 0.5 * 10 = scaled below
-    // Note: c2 = 0.5 but we compute fma(c2_adj, f, c3) where c2_adj = 0.5
+    // c2=0.5, c1=1.0, c0=1.0 are inlined as literals in the Horner evaluation below.
 
     // ── Step 1: Clamp ─────────────────────────────────────────────────────────
     z = _mm256_min_ps(z, max_exp);

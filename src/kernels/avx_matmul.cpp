@@ -185,7 +185,9 @@ static void gemm_micro_6x16_avx2(int kc,
  * gemm_micro_6x32_avx512 — 6×32 blocking using 512-bit ZMM accumulators.
  * Doubles the N-width vs AVX2 using the wider register file.
  */
-static void gemm_micro_6x32_avx512(int kc,
+// NOTE: Intentionally unused until the dual-accumulator 6×32 tile is complete
+// (see ROADMAP.md §v0.8). [[maybe_unused]] suppresses -Wunused-function.
+static void __attribute__((unused)) gemm_micro_6x32_avx512(int kc,
                                     const float* __restrict__ A_panel,
                                     const float* __restrict__ B_panel,
                                     float*       __restrict__ C,
