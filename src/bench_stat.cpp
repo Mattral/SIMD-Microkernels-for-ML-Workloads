@@ -225,6 +225,10 @@ static BenchConfig parse_args(int argc, char** argv) {
                    "  --output FILE      Write JSON results to FILE\n"
                    "  --quiet            Suppress progress output\n");
             std::exit(0);
+        } else {
+            fprintf(stderr, "bench_stat: unknown argument '%s'\n"
+                            "Run ./bench_stat --help for usage.\n", argv[i]);
+            std::exit(1);
         }
     }
     return cfg;
