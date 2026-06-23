@@ -41,6 +41,6 @@ inline void naive_sgemm(int M, int N, int K,
                         const float* A, int lda,
                         const float* B, int ldb,
                         float beta,
-                        float* C, int ldc) {
-    return simd_ml::gemm_ref::naive_sgemm(M, N, K, alpha, A, lda, B, ldb, beta, C, ldc);
+                        float* C, int ldc) noexcept {
+    simd_ml::gemm_ref::naive_sgemm(M, N, K, alpha, A, lda, B, ldb, beta, C, ldc);
 }
