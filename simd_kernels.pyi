@@ -18,6 +18,7 @@ def sgemm(
     C: Optional[NDArray[np.float32]] = None,
     alpha: float = 1.0,
     beta: float = 0.0,
+    isa: str = "",
 ) -> NDArray[np.float32]:
     """
     SIMD GEMM: C = alpha * A @ B + beta * C  (float32, in-place or allocates).
@@ -29,12 +30,63 @@ def sgemm(
     C     : ndarray[float32], shape [M, N], optional (allocated if None)
     alpha : float scalar, default 1.0
     beta  : float scalar, default 0.0 (0 = overwrite C)
+    isa   : str, default "" — ISA hint: "", "avx2", "avx512", or "scalar".
+            Validated but currently informational; the runtime dispatcher
+            (kernel_registry) selects the implementation automatically.
 
     Returns
     -------
     ndarray[float32], shape [M, N]
     """
     ...
+
+
+class GEMMConfig:
+    """
+    Callable GEMM configuration object.
+
+    Stores default alpha, beta, and isa values for repeated GEMM calls.
+    Tile parameters (tile_m, tile_n, tile_k, mr, nr) are accepted for API
+    completeness and future auto-tuning integration; they are currently
+    informational only.
+
+    Examples
+    --------
+    >>> gemm = GEMMConfig(alpha=2.0, beta=0.5, isa="avx2")
+    >>> C = gemm(A, B)
+    """
+
+    alpha: float
+    beta: float
+    isa: str
+    tile_m: int
+    tile_n: int
+    tile_k: int
+    mr: int
+    nr: int
+
+    def __init__(
+        self,
+        alpha: float = 1.0,
+        beta: float = 0.0,
+        isa: str = "",
+        tile_m: int = 128,
+        tile_n: int = 2048,
+        tile_k: int = 256,
+        mr: int = 8,
+        nr: int = 8,
+    ) -> None: ...
+
+    def __call__(
+        self,
+        A: NDArray[np.float32],
+        B: NDArray[np.float32],
+        C: Optional[NDArray[np.float32]] = None,
+        alpha: Optional[float] = None,
+        beta: Optional[float] = None,
+    ) -> NDArray[np.float32]: ...
+
+    def __repr__(self) -> str: ...
 
 
 # ─── Activation Functions ─────────────────────────────────────────────────────

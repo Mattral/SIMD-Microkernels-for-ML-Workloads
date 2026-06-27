@@ -42,6 +42,8 @@
 #include <stdexcept>
 #include <string>
 #include <vector>
+#include <sstream>
+#include <utility>
 
 #include "../kernels/activations/activations.hpp"
 #include "../kernels/gemm/avx2_gemm_packed.hpp"
@@ -100,9 +102,20 @@ static void check_writeable(const py::array& arr, const char* name) {
  */
 static py::array_t<float> py_sgemm(py::array A,
                                      py::array B,
-                                     py::object C = py::none(),
-                                     float alpha  = 1.0f,
-                                     float beta   = 0.0f) {
+                                     py::object C   = py::none(),
+                                     float alpha    = 1.0f,
+                                     float beta     = 0.0f,
+                                     const std::string& isa = "") {
+    // isa= is accepted for API compatibility with the roadmap DX vision
+    // (sk.gemm(A, B, isa="avx512")). Currently we dispatch at runtime via
+    // kernel_registry so the isa= hint is validated but not acted upon —
+    // the runtime dispatcher selects the best available implementation.
+    // When the AVX-512 dual-accumulator kernel lands (ROADMAP.md §v0.8),
+    // this parameter will select the 6×32 ZMM path explicitly.
+    if (!isa.empty() && isa != "avx2" && isa != "avx512" && isa != "scalar") {
+        throw std::runtime_error(
+            "isa must be one of: 'avx2', 'avx512', 'scalar' (got '" + isa + "')");
+    }
     validate_array(A, "A");
     validate_array(B, "B");
     if (A.ndim() != 2) throw std::runtime_error("A must be 2-D");
@@ -337,6 +350,72 @@ static bool py_is_aligned(py::array arr) {
 }
 
 // ─── Module definition ────────────────────────────────────────────────────────
+
+// ─── GEMMConfig C++ struct ───────────────────────────────────────────────────
+/**
+ * GEMMConfig — callable GEMM configuration object (roadmap §9 DX vision).
+ *
+ * Stores default alpha, beta, and isa values. Tile parameters (tile_m, tile_n,
+ * tile_k, mr, nr) are accepted for API completeness and future auto-tuning
+ * integration; they do not currently change dispatch (the compiled kernel uses
+ * compile-time constants). See ROADMAP.md §v0.9.
+ *
+ * Python usage:
+ *   gemm = sk.GEMMConfig(tile_m=128, tile_n=128, tile_k=256, mr=8, nr=8)
+ *   C = gemm(A, B)
+ *   C = sk.sgemm(A, B, isa="avx2")
+ */
+struct GEMMConfig {
+    float       alpha  = 1.0f;
+    float       beta   = 0.0f;
+    std::string isa    = "";
+    int         tile_m = 128;
+    int         tile_n = 2048;
+    int         tile_k = 256;
+    int         mr     = 8;
+    int         nr     = 8;
+
+    // Validate isa string — called from Python __init__ via __post_init__ logic
+    void validate() const {
+        if (!isa.empty() && isa != "avx2" && isa != "avx512" && isa != "scalar") {
+            throw py::value_error(
+                "isa must be one of: 'avx2', 'avx512', 'scalar' (got '" + isa + "')");
+        }
+        for (auto [name, val] : std::initializer_list<std::pair<const char*, int>>{
+                {"tile_m", tile_m}, {"tile_n", tile_n}, {"tile_k", tile_k},
+                {"mr", mr}, {"nr", nr}}) {
+            if (val <= 0)
+                throw py::value_error(
+                    std::string(name) + " must be positive, got " + std::to_string(val));
+        }
+    }
+
+    // __call__: C = alpha * A @ B + beta * C
+    py::array_t<float> call(
+        py::array A, py::array B,
+        py::object C_obj   = py::none(),
+        py::object alpha_o = py::none(),
+        py::object beta_o  = py::none()) const
+    {
+        float a = alpha_o.is_none() ? alpha : alpha_o.cast<float>();
+        float b = beta_o.is_none()  ? beta  : beta_o.cast<float>();
+        return py_sgemm(A, B, C_obj, a, b, isa);
+    }
+
+    std::string repr() const {
+        std::ostringstream ss;
+        ss << "GEMMConfig(alpha=" << alpha << ", beta=" << beta;
+        if (!isa.empty()) ss << ", isa='" << isa << "'";
+        if (tile_m != 128)  ss << ", tile_m=" << tile_m;
+        if (tile_n != 2048) ss << ", tile_n=" << tile_n;
+        if (tile_k != 256)  ss << ", tile_k=" << tile_k;
+        if (mr != 8) ss << ", mr=" << mr;
+        if (nr != 8) ss << ", nr=" << nr;
+        ss << ")";
+        return ss.str();
+    }
+};
+
 PYBIND11_MODULE(simd_kernels, m) {
     m.doc() =
         "IntrinsicML: Hand-vectorized AVX2/AVX-512 microkernels for ML workloads.\n\n"
@@ -353,6 +432,7 @@ PYBIND11_MODULE(simd_kernels, m) {
     m.def("sgemm", &py_sgemm,
           py::arg("A"), py::arg("B"), py::arg("C") = py::none(),
           py::arg("alpha") = 1.0f, py::arg("beta") = 0.0f,
+          py::arg("isa") = "",
           R"doc(
 SIMD GEMM: computes C = alpha * A @ B + beta * C  (float32).
 
@@ -447,4 +527,88 @@ np.ndarray[float32] same shape as x.
     m.def("is_aligned", &py_is_aligned,
           py::arg("arr"),
           "Return True if the array's data buffer is 64-byte aligned.");
+
+
+    // ─── GEMMConfig ──────────────────────────────────────────────────────────────
+    py::class_<GEMMConfig>(m, "GEMMConfig",
+        R"doc(
+Callable GEMM configuration object (roadmap §9 DX vision).
+
+Stores default alpha, beta, and isa values for repeated GEMM calls with
+consistent configuration. Tile parameters are accepted for API completeness
+and future auto-tuning integration.
+
+Parameters
+----------
+alpha   : float, default 1.0    — scalar multiplier for A@B
+beta    : float, default 0.0    — scalar multiplier for C (0 = overwrite)
+isa     : str, default ""       — ISA hint: "", "avx2", "avx512", "scalar"
+tile_m  : int, default 128      — M-panel tile (future auto-tuning)
+tile_n  : int, default 2048     — N-panel tile (future auto-tuning)
+tile_k  : int, default 256      — K-panel tile (future auto-tuning)
+mr      : int, default 8        — micro-kernel row block (future)
+nr      : int, default 8        — micro-kernel col block (future)
+
+Examples
+--------
+>>> import numpy as np, simd_kernels as sk
+>>> A = np.random.randn(256, 512).astype(np.float32)
+>>> B = np.random.randn(512, 128).astype(np.float32)
+>>>
+>>> gemm = sk.GEMMConfig()
+>>> C = gemm(A, B)
+>>>
+>>> gemm = sk.GEMMConfig(alpha=2.0, beta=0.5, isa="avx2")
+>>> C_init = np.zeros((256, 128), dtype=np.float32)
+>>> C = gemm(A, B, C=C_init)    # C = 2*A@B + 0.5*C_init
+>>>
+>>> gemm = sk.GEMMConfig(tile_m=128, tile_n=128, tile_k=256, mr=8, nr=8)
+>>> C = gemm(A, B)
+)doc")
+        .def(py::init([](float alpha, float beta, std::string isa,
+                         int tile_m, int tile_n, int tile_k, int mr, int nr) {
+                GEMMConfig cfg;
+                cfg.alpha = alpha; cfg.beta = beta; cfg.isa = std::move(isa);
+                cfg.tile_m = tile_m; cfg.tile_n = tile_n; cfg.tile_k = tile_k;
+                cfg.mr = mr; cfg.nr = nr;
+                cfg.validate();
+                return cfg;
+             }),
+             py::arg("alpha")  = 1.0f,
+             py::arg("beta")   = 0.0f,
+             py::arg("isa")    = "",
+             py::arg("tile_m") = 128,
+             py::arg("tile_n") = 2048,
+             py::arg("tile_k") = 256,
+             py::arg("mr")     = 8,
+             py::arg("nr")     = 8)
+        .def("__call__", &GEMMConfig::call,
+             py::arg("A"), py::arg("B"),
+             py::arg("C")     = py::none(),
+             py::arg("alpha") = py::none(),
+             py::arg("beta")  = py::none(),
+             R"doc(
+Compute C = alpha * A @ B + beta * C using stored configuration.
+
+Parameters
+----------
+A     : ndarray[float32], shape [M, K]
+B     : ndarray[float32], shape [K, N]
+C     : ndarray[float32], shape [M, N], optional (allocated if None)
+alpha : float, optional — overrides stored alpha for this call only
+beta  : float, optional — overrides stored beta  for this call only
+)doc")
+        .def("__repr__", &GEMMConfig::repr)
+        .def_readwrite("alpha",  &GEMMConfig::alpha,
+                       "Scalar multiplier for A@B.")
+        .def_readwrite("beta",   &GEMMConfig::beta,
+                       "Scalar multiplier for existing C (0 = overwrite).")
+        .def_readwrite("isa",    &GEMMConfig::isa,
+                       "ISA hint string: '', 'avx2', 'avx512', or 'scalar'.")
+        .def_readwrite("tile_m", &GEMMConfig::tile_m, "M-panel tile size.")
+        .def_readwrite("tile_n", &GEMMConfig::tile_n, "N-panel tile size.")
+        .def_readwrite("tile_k", &GEMMConfig::tile_k, "K-panel tile size.")
+        .def_readwrite("mr",     &GEMMConfig::mr,     "Micro-kernel row block.")
+        .def_readwrite("nr",     &GEMMConfig::nr,     "Micro-kernel col block.");
+
 }
