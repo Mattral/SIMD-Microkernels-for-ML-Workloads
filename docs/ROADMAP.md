@@ -56,6 +56,8 @@
 - [✅] `benchmarks/check_regression.py`: CI regression gate (configurable threshold)
 - [✅] `bench.yml` weekly cron + automated regression check
 - [✅] `docs/BENCHMARKS.md` with roofline analysis and reproducibility instructions
+- [✅] OpenBLAS baseline comparison with real measured data (`-DBENCH_OPENBLAS=ON`,
+      wired into both `bench` and `bench_stat`; see `docs/BENCHMARKS.md §Positioning vs OpenBLAS`)
 
 ---
 
@@ -90,10 +92,15 @@
 ---
 
 ## v0.9 — Additional Primitives (Planned)
+- [❌] Skip panel packing below a size threshold (direct unpacked micro-kernel
+      call for small N). Measured impact: IntrinsicML is at 3.7% of OpenBLAS
+      at N=64 vs 46–48% at N≥256 — packing overhead dominates small-matrix
+      GEMM and is not yet amortised. See `docs/BENCHMARKS.md §Positioning vs
+      OpenBLAS` for the measurement that identified this.
 - [❌] BF16 GEMM kernel (AVX-512 BF16, relevant for modern LLM inference)
 - [❌] FP16 GEMM kernel (F16C extension)
-- [❌] Vectorized `exp` via Cody–Waite (shared with Softmax for fast path)
-- [❌] Vectorized Softmax inner loop using fast exp approximation
+- [✅] Vectorized `exp` via Cody–Waite (`fast_exp_avx2` in `simd_math.hpp`, shared by GeLU/SiLU/Softmax)
+- [✅] Vectorized Softmax inner loop using fast exp approximation (`softmax_avx2.cpp` Pass 2)
 - [❌] `FlashAttention`-style fused attention microkernel (research target)
 
 ---
