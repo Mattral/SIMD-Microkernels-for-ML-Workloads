@@ -89,12 +89,12 @@ Typical single-core numbers on an x86-64 desktop with AVX2 at 3.5 GHz:
 
 | Kernel | Size | Speedup vs Scalar | vs OpenBLAS (1T) |
 |--------|------|-------------------|------------------|
-| GEMM   | 64×64 | ~5× | ~90% |
-| GEMM   | 256×256 | ~11× | ~40–50% |
-| GEMM   | 512×512 | ~8× | ~30% |
+| GEMM   | 64×64 | ~5× | ~4% |
+| GEMM   | 256×256 | ~11× | ~48% |
+| GEMM   | 512×512 | ~8× | ~46% |
 | GeLU   | 1M elements | ~6–10× | N/A |
 
-The gap to OpenBLAS is well-understood and intentional — see [`docs/DESIGN.md §7`](docs/DESIGN.md#7-explicitly-acknowledged-gaps-vs-production-blas). Run `./bench_stat` on your hardware for reproducible numbers.
+The gap to OpenBLAS is well-understood and intentional — see [`docs/DESIGN.md §7`](docs/DESIGN.md#7-explicitly-acknowledged-gaps-vs-production-blas) and the full measured comparison in [`docs/BENCHMARKS.md § Positioning vs OpenBLAS`](docs/BENCHMARKS.md#positioning-vs-openblas-captured-2026-07-ci-environment). Small matrices (≤64) are the largest gap today — packing overhead dominates before it's amortised. Run `./bench_stat --sizes 64,128,256,512,1024 --reps 30` with `-DBENCH_OPENBLAS=ON` on your hardware for reproducible numbers.
 
 For rigorous comparison with CPU frequency locked:
 ```bash

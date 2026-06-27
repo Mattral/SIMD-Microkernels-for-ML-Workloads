@@ -13,7 +13,7 @@ engineering-complete** reference implementation of SIMD microkernels for ML.
 | Axis               | What we are                         | What we are not |
 |--------------------|-------------------------------------|-----------------|
 | Correctness        | Validated against NumPy/PyTorch     | A toy / untested sketch |
-| Performance        | 15–25% of OpenBLAS single-threaded  | A BLAS replacement |
+| Performance        | 46–48% of OpenBLAS at N≥256 (measured; see BENCHMARKS.md) | A BLAS replacement |
 | Readability        | Commented intrinsics with rationale | Opaque assembly |
 | Usability          | `pip install`-able Python library   | An isolated demo |
 
