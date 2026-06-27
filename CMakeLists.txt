@@ -94,6 +94,20 @@ if(pybind11_FOUND)
     )
     target_link_libraries(simd_kernels PRIVATE simd_kernels_lib)
     target_compile_options(simd_kernels PRIVATE ${PERF_FLAGS})
+
+    # CRITICAL: scikit-build-core builds a pip wheel by running `cmake --install`
+    # and packaging whatever ends up installed. Once this project added other
+    # install() rules below (static library, headers, CMake config, bench
+    # executables) for `cmake --install` / find_package() consumers, the wheel
+    # stopped containing the actual importable .so — because there was no
+    # install() rule for the extension module itself. That produced wheels
+    # that installed successfully but failed `import simd_kernels` with
+    # ModuleNotFoundError. DESTINATION "." places it at the wheel root so
+    # `import simd_kernels` resolves it directly from site-packages.
+    install(TARGETS simd_kernels
+        LIBRARY DESTINATION "." COMPONENT PythonModule
+        RUNTIME DESTINATION "." COMPONENT PythonModule
+    )
 else()
     message(STATUS "pybind11 not found: skipping Python extension build")
 endif()
@@ -106,18 +120,6 @@ target_link_libraries(bench PRIVATE simd_kernels_lib)
 target_include_directories(bench PRIVATE src)
 target_compile_options(bench PRIVATE ${PERF_FLAGS})
 
-# Optional OpenBLAS linkage for baseline comparisons
-if(BENCH_OPENBLAS)
-    find_package(BLAS QUIET)
-    if(BLAS_FOUND)
-        target_link_libraries(bench PRIVATE ${BLAS_LIBRARIES})
-        target_compile_definitions(bench PRIVATE BENCH_WITH_OPENBLAS)
-        message(STATUS "OpenBLAS found; baseline comparison enabled in bench")
-    else()
-        message(WARNING "BENCH_OPENBLAS=ON but BLAS not found; disabling")
-    endif()
-endif()
-
 # ─── Statistical benchmark tool (extended harness) ──────────────────────────
 add_executable(bench_stat
     src/bench_stat.cpp
@@ -125,6 +127,23 @@ add_executable(bench_stat
 target_link_libraries(bench_stat PRIVATE simd_kernels_lib)
 target_include_directories(bench_stat PRIVATE src)
 target_compile_options(bench_stat PRIVATE ${PERF_FLAGS})
+
+# Optional OpenBLAS linkage for baseline comparisons.
+# Applied to BOTH bench and bench_stat: bench_stat's JSON output is what
+# feeds docs/BENCHMARKS.md and benchmarks/check_regression.py, so it needs
+# the same comparison capability as the RDTSC harness.
+if(BENCH_OPENBLAS)
+    find_package(BLAS QUIET)
+    if(BLAS_FOUND)
+        target_link_libraries(bench PRIVATE ${BLAS_LIBRARIES})
+        target_compile_definitions(bench PRIVATE BENCH_WITH_OPENBLAS)
+        target_link_libraries(bench_stat PRIVATE ${BLAS_LIBRARIES})
+        target_compile_definitions(bench_stat PRIVATE BENCH_WITH_OPENBLAS)
+        message(STATUS "OpenBLAS found; baseline comparison enabled in bench and bench_stat")
+    else()
+        message(WARNING "BENCH_OPENBLAS=ON but BLAS not found; disabling")
+    endif()
+endif()
 
 # ─── Tests ───────────────────────────────────────────────────────────────────
 enable_testing()
