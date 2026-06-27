@@ -15,6 +15,9 @@ if(NOT doctest_FOUND)
         doctest
         GIT_REPOSITORY https://github.com/doctest/doctest.git
         GIT_TAG v2.4.12
+        # EXCLUDE_FROM_ALL: prevents doctest's own install() rules from running
+        # when the user runs `cmake --install`. Only our project artifacts install.
+        EXCLUDE_FROM_ALL
     )
     FetchContent_MakeAvailable(doctest)
 endif()

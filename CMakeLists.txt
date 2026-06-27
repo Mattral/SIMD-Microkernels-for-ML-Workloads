@@ -1,5 +1,9 @@
 cmake_minimum_required(VERSION 3.22)
-project(simd_ml_microkernels CXX)
+project(simd_ml_microkernels VERSION 0.2.0 LANGUAGES CXX)
+
+# Must be included before any use of CMAKE_INSTALL_INCLUDEDIR / LIBDIR / etc.
+# (used in target_include_directories() below and in the install() rules further down).
+include(GNUInstallDirs)
 
 # ─── Compiler requirements ────────────────────────────────────────────────────
 set(CMAKE_CXX_STANDARD 17)
@@ -58,8 +62,16 @@ add_library(simd_kernels_lib STATIC
     src/kernels/activations/layer_norm_avx2.cpp
     src/kernels/gemm/gemm_dispatcher.cpp
 )
-target_include_directories(simd_kernels_lib PUBLIC src ${CMAKE_SOURCE_DIR}/src/kernels)
+# BUILD_INTERFACE: in-source build uses src/ and src/kernels/ directly.
+# INSTALL_INTERFACE: installed consumers use ${prefix}/include/ so that
+# #include <simd_kernels/foo.hpp> resolves to ${prefix}/include/simd_kernels/foo.hpp
+target_include_directories(simd_kernels_lib PUBLIC
+    $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/src>
+    $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/src/kernels>
+    $<INSTALL_INTERFACE:${CMAKE_INSTALL_INCLUDEDIR}>
+)
 set_target_properties(simd_kernels_lib PROPERTIES POSITION_INDEPENDENT_CODE ON)
+
 target_compile_options(simd_kernels_lib PRIVATE ${PERF_FLAGS})
 
 if(OpenMP_CXX_FOUND AND SIMD_ML_OPENMP)
@@ -69,6 +81,11 @@ if(OpenMP_CXX_FOUND AND SIMD_ML_OPENMP)
 else()
     message(STATUS "OpenMP support disabled or not found")
 endif()
+
+# Alias: simd_kernels::simd_kernels → simd_kernels_lib
+# This is the canonical target name that downstream find_package() consumers link against.
+# The _lib suffix is an internal CMake convention; the public API name has no suffix.
+add_library(simd_kernels::simd_kernels ALIAS simd_kernels_lib)
 
 # ─── Python extension module (optional) ───────────────────────────────────────
 if(pybind11_FOUND)
@@ -112,3 +129,86 @@ target_compile_options(bench_stat PRIVATE ${PERF_FLAGS})
 # ─── Tests ───────────────────────────────────────────────────────────────────
 enable_testing()
 add_subdirectory(tests)
+
+# ─── Install rules ────────────────────────────────────────────────────────────
+# Enables:  cmake --install <build_dir> --prefix /usr/local
+# Installs: static library, all public headers, bench/bench_stat, CMake package config.
+# Python extension is installed via pip (scikit-build-core), not cmake --install.
+#
+# After installation, downstream projects can use:
+#   find_package(simd_kernels REQUIRED)
+#   target_link_libraries(my_target PRIVATE simd_kernels::simd_kernels)
+
+# ── Static library ───────────────────────────────────────────────────────────
+# Exclude the precision_lib (test-only) and Python extension from install.
+# Export the target so find_package() consumers can link against it.
+install(TARGETS simd_kernels_lib
+    EXPORT  simd_kernels-targets
+    ARCHIVE DESTINATION "${CMAKE_INSTALL_LIBDIR}"
+    COMPONENT Development
+)
+
+# ── Public headers ───────────────────────────────────────────────────────────
+# Install kernel headers (avx_matmul.hpp, intrinsic_gelu.hpp, etc.)
+# Headers install into ${prefix}/include/simd_kernels/ so that consumers can
+# write:  #include <simd_kernels/gemm/avx2_gemm_packed.hpp>
+# The INSTALL_INTERFACE include path is ${CMAKE_INSTALL_INCLUDEDIR} (see above),
+# so the compiler looks for simd_kernels/... relative to that prefix — which is
+# exactly where the install(DIRECTORY) puts the files.
+install(DIRECTORY src/kernels/
+    DESTINATION "${CMAKE_INSTALL_INCLUDEDIR}/simd_kernels"
+    COMPONENT Development
+    FILES_MATCHING PATTERN "*.hpp"
+    PATTERN "gemm/gemm_dispatcher*" EXCLUDE
+    PATTERN "gemm/naive_gemm*"      EXCLUDE
+)
+install(DIRECTORY src/dispatch/
+    DESTINATION "${CMAKE_INSTALL_INCLUDEDIR}/simd_kernels"
+    COMPONENT Development
+    FILES_MATCHING PATTERN "*.hpp"
+)
+
+# ── Benchmark executables ─────────────────────────────────────────────────────
+# Install under libexec/simd_kernels so they don't clutter PATH.
+install(TARGETS bench bench_stat
+    RUNTIME DESTINATION "${CMAKE_INSTALL_LIBEXECDIR}/simd_kernels"
+    COMPONENT Benchmarks
+)
+
+# ── CMake package config ──────────────────────────────────────────────────────
+# Generates simd_kernels-config.cmake and simd_kernels-config-version.cmake
+# so downstream CMake projects can use find_package(simd_kernels).
+include(CMakePackageConfigHelpers)
+
+set(SIMD_KERNELS_INSTALL_CMAKEDIR
+    "${CMAKE_INSTALL_LIBDIR}/cmake/simd_kernels"
+    CACHE PATH "Directory for simd_kernels CMake package config files")
+
+write_basic_package_version_file(
+    "${CMAKE_CURRENT_BINARY_DIR}/simd_kernels-config-version.cmake"
+    VERSION     "${PROJECT_VERSION}"
+    COMPATIBILITY SameMajorVersion
+)
+
+configure_package_config_file(
+    "${CMAKE_CURRENT_SOURCE_DIR}/cmake/simd_kernels-config.cmake.in"
+    "${CMAKE_CURRENT_BINARY_DIR}/simd_kernels-config.cmake"
+    INSTALL_DESTINATION "${SIMD_KERNELS_INSTALL_CMAKEDIR}"
+)
+
+# Install the exported target definition (needed for find_package to work)
+install(EXPORT simd_kernels-targets
+    FILE        simd_kernels-targets.cmake
+    NAMESPACE   simd_kernels::
+    DESTINATION "${SIMD_KERNELS_INSTALL_CMAKEDIR}"
+    COMPONENT   Development
+)
+
+# Install the config files themselves
+install(FILES
+    "${CMAKE_CURRENT_BINARY_DIR}/simd_kernels-config.cmake"
+    "${CMAKE_CURRENT_BINARY_DIR}/simd_kernels-config-version.cmake"
+    DESTINATION "${SIMD_KERNELS_INSTALL_CMAKEDIR}"
+    COMPONENT   Development
+)
+
