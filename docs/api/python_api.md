@@ -39,6 +39,44 @@ simd_kernels.sgemm(A, B, C, alpha=2.0, beta=0.5)
 
 **Implementation**: Goto/BLIS 5-loop structure with panel packing (8×8 register tile, AVX2 FMA). See `docs/DESIGN.md §2–3`.
 
+### `GEMMConfig` — callable GEMM configuration object
+
+```python
+class GEMMConfig:
+    def __init__(self, alpha=1.0, beta=0.0, isa="",
+                 tile_m=128, tile_n=2048, tile_k=256, mr=8, nr=8): ...
+    def __call__(self, A, B, C=None, alpha=None, beta=None) -> np.ndarray: ...
+```
+
+Stores default `alpha`, `beta`, and `isa` for repeated GEMM calls. Tile
+parameters (`tile_m`, `tile_n`, `tile_k`, `mr`, `nr`) are accepted for API
+completeness and are validated (must be positive), but do not currently
+change dispatch — the compiled kernel uses fixed compile-time constants.
+Auto-tuned tile selection is planned (`docs/ROADMAP.md §v0.9`).
+
+```python
+gemm = simd_kernels.GEMMConfig(alpha=2.0, beta=0.5, isa="avx2")
+C = gemm(A, B)                      # uses stored alpha=2.0, beta=0.5
+C = gemm(A, B, alpha=1.0, beta=0.0) # per-call override
+print(gemm)                          # GEMMConfig(alpha=2.0, beta=0.5, isa='avx2')
+```
+
+`isa` must be one of `""`, `"avx2"`, `"avx512"`, `"scalar"` — an invalid
+value raises `ValueError` at construction time. The `isa=` parameter is also
+accepted directly by `sgemm()`:
+
+```python
+C = simd_kernels.sgemm(A, B, isa="avx2")   # validated, currently informational
+```
+
+**Why is `isa=` "currently informational"?** The runtime dispatcher
+(`kernel_registry.hpp`) already selects the best available SIMD path via
+CPUID at process startup — there is one compiled GEMM kernel per ISA tier,
+not a runtime-selectable set. The `isa=` parameter exists today for forward
+API compatibility: once the dual-accumulator AVX-512 kernel lands
+(`docs/ROADMAP.md §v0.8`), this parameter will let callers explicitly select
+between the AVX2 and AVX-512 paths on AVX-512-capable hardware.
+
 ---
 
 ## Activation Functions

@@ -44,7 +44,9 @@
 - [✅] Python type stubs (`simd_kernels.pyi`) for IDE autocompletion
 - [✅] `simd_kernels.build_info()` / `detected_isa()` / `is_aligned()`
 - [✅] `set_num_threads` / `get_num_threads` exposed to Python
-- [✅] 90+ Python tests (precision × kernels × shapes, edge cases, error handling)
+- [✅] `GEMMConfig` callable configuration object (roadmap §9 DX vision)
+- [✅] `isa=` keyword argument on `sgemm()` and `GEMMConfig` (validated, forward-compatible)
+- [✅] 100+ Python tests (precision × kernels × shapes, edge cases, error handling)
 - [✅] Optional PyTorch cross-validation in test suite
 
 ---
