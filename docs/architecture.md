@@ -6,26 +6,26 @@ The diagram below shows the full dependency graph.
 ```
 ┌─────────────────────────────────────────────────────────────────┐
 │                    Python / NumPy Layer                         │
-│   simd_kernels.*  (pybind11, GIL-release, shape validation)     │
+│   simd_kernels.*  (pybind11, GIL-release, shape validation)    │
 └────────────────────────────┬────────────────────────────────────┘
                              │
               ┌──────────────┼──────────────┐
               │              │              │
-   ┌──────────▼───────────┐  │  ┌───────────▼───────────┐
-   │  Activation Kernels  │  │  │  GEMM Kernels         │
-   │  relu_avx2.cpp       │  │  │  avx2_gemm_packed.cpp │
-   │  silu_avx2.cpp       │  │  │  (8×8 primary kernel) │
-   │  softmax_avx2.cpp    │  │  │                       │
-   │  layer_norm_avx2.cpp │  │  │  avx_matmul.cpp       │
-   │  intrinsic_gelu.cpp  │  │  │  (6×16 alt. kernel)   │
-   └──────────┬───────────┘  │  └───────────┬───────────┘
+   ┌──────────▼──────────┐  │  ┌───────────▼────────────┐
+   │  Activation Kernels  │  │  │  GEMM Kernels           │
+   │  relu_avx2.cpp       │  │  │  avx2_gemm_packed.cpp  │
+   │  silu_avx2.cpp       │  │  │  (8×8 primary kernel)  │
+   │  softmax_avx2.cpp    │  │  │                         │
+   │  layer_norm_avx2.cpp │  │  │  avx_matmul.cpp         │
+   │  intrinsic_gelu.cpp  │  │  │  (6×16 alt. kernel)    │
+   └──────────┬───────────┘  │  └───────────┬────────────┘
               │              │              │
    ┌──────────▼──────────────▼──────────────▼────────────┐
-   │               Shared Math Infrastructure            │
+   │               Shared Math Infrastructure             │
    │   simd_math.hpp (fast_exp_avx2, tanh_avx2)          │
    │   cache_alloc.hpp (64-byte aligned allocator)       │
    │   cpuid.hpp / kernel_registry.hpp (ISA dispatch)    │
-   └─────────────────────────────────────────────────────┘
+   └────────────────────────────────────────────────────┘
 ```
 
 ---

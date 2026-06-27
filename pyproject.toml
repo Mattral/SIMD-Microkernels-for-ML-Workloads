@@ -35,6 +35,12 @@ Issues     = "https://github.com/Mattral/SIMD-Microkernels-for-ML-Workloads/issu
 cmake.build-type = "Release"
 cmake.verbose    = false
 wheel.packages   = []     # C extension only — no Python package directory
+# Only install the Python extension module into the wheel. Without this,
+# scikit-build-core packages everything the project's CMakeLists.txt
+# install() rules touch — static lib, public headers, CMake package config,
+# benchmark executables — none of which belong in a pip wheel, and (until
+# this was fixed) the wheel didn't even contain the actual importable .so.
+install.components = ["PythonModule"]
 
 # ─── pytest configuration ─────────────────────────────────────────────────────
 [tool.pytest.ini_options]
