@@ -97,6 +97,75 @@ detection (>15% drop = alert) but should not be cited as absolute throughput.
 
 ---
 
+## Positioning vs OpenBLAS (Captured 2026-07, CI Environment)
+
+Built with `-DBENCH_OPENBLAS=ON` (requires `libopenblas-dev`). This links
+OpenBLAS's `sgemm_` symbol directly into `bench_stat` for an apples-to-apples
+comparison on the same process, same input data, same measurement harness.
+
+```bash
+cmake -S . -B build -DCMAKE_BUILD_TYPE=Release -DBENCH_OPENBLAS=ON
+cmake --build build --parallel
+./build/bench_stat --sizes 64,128,256,512,1024 --reps 30
+```
+
+```
+  Kernel            N    min GFLOPS
+  ------          ---    -----------
+  simd_packed      64      5.5
+  openblas         64    149.0
+  simd_packed     128     27.1
+  openblas        128    101.9
+  simd_packed     256     55.1
+  openblas        256    113.8
+  simd_packed     512     57.9
+  openblas        512    125.1
+  simd_packed    1024     57.6
+  openblas       1024    117.4
+```
+
+| N    | IntrinsicML (GFLOPS) | OpenBLAS (GFLOPS) | IntrinsicML / OpenBLAS |
+|------|----------------------|--------------------|------------------------|
+| 64   | 5.5                  | 149.0              | 3.7%                   |
+| 128  | 27.1                 | 101.9              | 26.6%                  |
+| 256  | 55.1                 | 113.8              | 48.4%                  |
+| 512  | 57.9                 | 125.1              | 46.3%                  |
+| 1024 | 57.6                 | 117.4              | 49.1%                  |
+
+**Honest positioning:**
+
+- **Small matrices (N ≤ 64) — IntrinsicML is far behind (3.7%).** OpenBLAS's
+  hand-tuned assembly microkernel has near-zero fixed overhead and reaches
+  peak throughput almost instantly for cache-resident sizes. IntrinsicML's
+  panel-packing overhead (`pack_a_panel`/`pack_b_panel`) is not amortised at
+  this size — the packing cost dominates the actual FMA work. This is the
+  single largest, most fixable gap: skipping packing below a size threshold
+  (falling back to a direct unpacked micro-kernel call) is a concrete v0.9
+  candidate.
+- **Medium-to-large matrices (N ≥ 256) — IntrinsicML holds at 46–49% of
+  OpenBLAS.** This matches the range documented in `docs/DESIGN.md §7`: no
+  hand-written assembly, fixed (non-auto-tuned) tile sizes, and no AVX-512
+  micro-kernel yet. Reaching parity would require the work tracked in
+  `docs/ROADMAP.md §v0.8–v0.9` (AVX-512 dual-accumulator kernel, auto-tuned
+  tiles). None of that work is exotic — it is exactly what separates a
+  reference implementation like this one from a production BLAS library, and
+  is the explicit motivation for this project's existence (see README.md).
+- **OpenBLAS is not a stand-in for "the theoretical CPU peak."** Its 149
+  GFLOPS at N=64 in this environment likely benefits from a hand-scheduled
+  microkernel exploiting instruction-level parallelism this project's C++
+  intrinsics do not attempt to replicate. Runners with more cores may also
+  see OpenBLAS default to multi-threaded execution even for a single `sgemm_`
+  call — the CI runner this was captured on reports `nproc=1`, so threading
+  is not a confound in the numbers above, but this should be verified before
+  citing these numbers from a different environment (`OPENBLAS_NUM_THREADS=1`
+  forces single-threaded OpenBLAS if in doubt).
+
+This comparison is not run in CI by default (`BENCH_OPENBLAS=OFF` unless
+explicitly enabled) because most CI runners do not have OpenBLAS preinstalled
+and it is not needed for the correctness or regression-gate test suites.
+
+---
+
 ## GeLU Benchmarks (Captured 2026-06, CI Environment)
 
 ### Cycle-accurate (`bench`)
