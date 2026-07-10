@@ -39,15 +39,20 @@ After packing B into a contiguous `kc × nr` panel:
 
 ## Tile Size Derivation
 
-| Constant | 8×8 kernel | 6×16 kernel | Derivation |
-|---|---|---|---|
-| MR | 8 | 6 | Register accumulators: MR × (NR/8) YMMs must fit in 16 YMM file |
-| NR | 8 | 16 | 8 floats/YMM; 6×16 uses 12 accumulators, wider ILP |
-| KC | 256 | 256 | Ac+Bc panels fit in L2 (256 KB): MC×KC×4 + KC×NC×4 ≤ L2 |
-| MC | 128 | 64 | Ac panel (MC×KC×4 = 128 KB) fits in L2 alongside Bc |
-| NC | 2048 | 64 | Large NC amortises B packing cost across many M-tiles |
+| Constant | 8×8 AVX2 | 8×16 AVX-512 | 6×16 AVX2 | 6×32 AVX-512 | Derivation |
+|---|---|---|---|---|---|
+| MR | 8 | 8 (= MR512) | 6 | 6 | Register accumulators must fit in the register file |
+| NR | 8 | 16 | 16 | 32 | float-width of the SIMD register (8 for YMM, 16 for ZMM) × accumulators-per-row |
+| KC | 256 | 256 | 256 | 256 | Ac+Bc panels fit in L2 (256 KB): MC×KC×4 + KC×NC×4 ≤ L2 — unchanged by ISA |
+| MC | 128 | 128 | 64 | 64 | Ac panel size; unchanged by ISA (MR is identical between AVX2/AVX-512 for both kernels) |
+| NC | 2048 | 2048 | 64 | 64 | Large NC amortises B packing cost; unchanged by ISA |
 
-The NC=2048 choice in `avx2_gemm_packed.cpp` (vs NC=64 in `avx_matmul.cpp`) reflects a trade-off: larger NC means fewer B packing passes but larger L3 working set. For the Python-facing kernel, L3-resident B panels are acceptable since the outer loop is parallelised with OpenMP.
+Only NR changes between the AVX2 and AVX-512 variant of each kernel — MC/KC/NC
+are cache-derived and independent of SIMD register width, so they carry over
+unchanged. See ROADMAP.md §v0.8 for why the two kernels chose different
+AVX-512 register strategies (single- vs dual-accumulator).
+
+The NC=2048 choice in `avx2_gemm_packed.cpp` (vs NC=64 in `avx_matmul.cpp`) reflects a trade-off: larger NC means fewer B packing passes but larger L3 working set. For the Python-facing kernel, L3-resident B panels are acceptable since the outer loop can be parallelised with OpenMP (opt-in via `-DSIMD_ML_OPENMP=ON`; single-threaded by default).
 
 ---
 
@@ -121,3 +126,61 @@ For each k:
 12 FMAs per k-step (6 rows × 2 vectors). With two FMA ports this processes 16 columns simultaneously — wider than the 8×8 kernel but with higher register pressure (15/16 YMM used).
 
 The `alpha` scalar is folded into `pack_A` at packing time, eliminating a per-k multiply in the inner loop.
+
+---
+
+## Inner Kernel: 8×16 AVX-512 (`avx2_gemm_packed.cpp`)
+
+Runtime-dispatched on AVX-512-capable hardware (falls back to the 8×8 AVX2
+kernel above otherwise — see `gemm_packed_isa_is_avx512()`):
+
+```
+Registers:
+  acc0..acc7   8 ZMM   (8 row accumulators, one per row)
+  c0..c7       8 ZMM   (existing C values)
+  b            1 ZMM   (B panel column, 16 floats)
+
+For each p in 0..kc-1:
+  b = loadu(B_block + p*NR512)          # 16 floats from B panel
+  acc0 = fmadd(set1(a0[p]), b, acc0)    # row 0
+  ...
+  acc7 = fmadd(set1(a7[p]), b, acc7)    # row 7
+
+C[0..7][0..15] += alpha * acc[0..7]     # write-back
+```
+
+Structurally identical to the 8×8 AVX2 kernel — same broadcast pattern, same
+single-accumulator-per-row design — just twice the register width. One ZMM
+(16 floats) already spans the full NR512=16 tile, so no dual-accumulator
+split is needed (unlike the 6×32 kernel below). Register budget: 17/32 ZMM
+used, 15 registers of headroom. See `docs/design/avx2_register_file.md
+§AVX-512 Status` for the full register allocation rationale.
+
+---
+
+## Inner Kernel: 6×32 AVX-512 (`avx_matmul.cpp`)
+
+Runtime-dispatched analogously via `avx_matmul_isa_is_avx512()`:
+
+```
+Registers:
+  c0_lo,c0_hi .. c5_lo,c5_hi   12 ZMM  (6 rows × 2 halves each)
+  b_lo, b_hi                    2 ZMM  (32 floats = 2 ZMM)
+  a_broadcast                   1 ZMM  (scalar broadcast)
+
+For each k:
+  b_lo = load(B + k*32),  b_hi = load(B + k*32 + 16)
+  a_bcast = set1(A[k*6 + row])
+  c_row_lo = fmadd(a_bcast, b_lo, c_row_lo)   # cols 0-15
+  c_row_hi = fmadd(a_bcast, b_hi, c_row_hi)   # cols 16-31
+```
+
+A 32-column tile exceeds one ZMM's 16-float width, so — unlike the 8×16
+kernel above — each row genuinely needs two accumulators (lo/hi halves).
+This dual-accumulator design is exactly what an earlier, disabled version
+of this kernel got wrong: it declared a 32-wide tile but only ever computed
+and wrote the "lo" half, silently leaving the "hi" half of every output
+tile untouched after a `beta=0` memset. Both kernels above are covered by
+permanent forced-full-coverage regression tests (`tests/test_gemm.cpp`,
+`tests/test_gemm_packed.cpp`) specifically targeting this failure mode —
+see ROADMAP.md §v0.8 for the full history.

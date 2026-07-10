@@ -112,45 +112,43 @@ cmake --build build --parallel
 ```
   Kernel            N    min GFLOPS
   ------          ---    -----------
-  simd_packed      64      5.5
-  openblas         64    149.0
-  simd_packed     128     27.1
-  openblas        128    101.9
-  simd_packed     256     55.1
-  openblas        256    113.8
-  simd_packed     512     57.9
-  openblas        512    125.1
-  simd_packed    1024     57.6
-  openblas       1024    117.4
+  simd_packed      64      6.4
+  openblas         64    165.0
+  simd_packed     128     29.5
+  openblas        128    102.0
+  simd_packed     256     64.1
+  openblas        256    115.4
+  simd_packed     512     73.3
+  openblas        512    123.4
+  simd_packed    1024     73.8
+  openblas       1024    124.0
 ```
 
-| N    | IntrinsicML (GFLOPS) | OpenBLAS (GFLOPS) | IntrinsicML / OpenBLAS |
-|------|----------------------|--------------------|------------------------|
-| 64   | 5.5                  | 149.0              | 3.7%                   |
-| 128  | 27.1                 | 101.9              | 26.6%                  |
-| 256  | 55.1                 | 113.8              | 48.4%                  |
-| 512  | 57.9                 | 125.1              | 46.3%                  |
-| 1024 | 57.6                 | 117.4              | 49.1%                  |
+| N    | IntrinsicML (GFLOPS) | OpenBLAS (GFLOPS) | IntrinsicML / OpenBLAS | vs pre-AVX-512 |
+|------|----------------------|--------------------|------------------------|----------------|
+| 64   | 6.4                  | 165.0              | 3.9%                   | 3.7% (≈ unchanged) |
+| 128  | 29.5                 | 102.0              | 28.9%                  | 26.6% (+2.3 pt) |
+| 256  | 64.1                 | 115.4              | 55.5%                  | 48.4% (+7.1 pt) |
+| 512  | 73.3                 | 123.4              | 59.4%                  | 46.3% (+13.1 pt) |
+| 1024 | 73.8                 | 124.0              | 59.5%                  | 49.1% (+10.4 pt) |
 
 **Honest positioning:**
 
-- **Small matrices (N ≤ 64) — IntrinsicML is far behind (3.7%).** OpenBLAS's
-  hand-tuned assembly microkernel has near-zero fixed overhead and reaches
-  peak throughput almost instantly for cache-resident sizes. IntrinsicML's
-  panel-packing overhead (`pack_a_panel`/`pack_b_panel`) is not amortised at
-  this size — the packing cost dominates the actual FMA work. This is the
-  single largest, most fixable gap: skipping packing below a size threshold
-  (falling back to a direct unpacked micro-kernel call) is a concrete v0.9
-  candidate.
-- **Medium-to-large matrices (N ≥ 256) — IntrinsicML holds at 46–49% of
-  OpenBLAS.** This matches the range documented in `docs/DESIGN.md §7`: no
-  hand-written assembly, fixed (non-auto-tuned) tile sizes, and no AVX-512
-  micro-kernel yet. Reaching parity would require the work tracked in
-  `docs/ROADMAP.md §v0.8–v0.9` (AVX-512 dual-accumulator kernel, auto-tuned
-  tiles). None of that work is exotic — it is exactly what separates a
-  reference implementation like this one from a production BLAS library, and
-  is the explicit motivation for this project's existence (see README.md).
-- **OpenBLAS is not a stand-in for "the theoretical CPU peak."** Its 149
+- **Small matrices (N ≤ 64) — IntrinsicML is far behind (3.9%), and AVX-512
+  barely moved this number.** This is expected: at N=64 the algorithm is
+  packing-overhead-bound, not FMA-throughput-bound, so doubling the SIMD
+  width (the AVX-512 change) has almost nothing to work with — packing cost
+  dominates regardless of how fast the inner FMA loop runs. Skipping packing
+  below a size threshold (direct unpacked micro-kernel call) remains the
+  correct fix for this regime and is tracked in `docs/ROADMAP.md §v0.9`.
+- **Medium-to-large matrices (N ≥ 256) — IntrinsicML improved from ~46–49%
+  to 55–59% of OpenBLAS** after adding the AVX-512 8×16 micro-kernel
+  (`docs/ROADMAP.md §v0.8`). This is a genuine, repeated-trial-verified
+  improvement — not noise — closing 7–13 percentage points of the gap. The
+  remaining gap matches what's documented in `docs/DESIGN.md §7`: no
+  hand-written assembly, and fixed (non-auto-tuned) tile sizes derived for
+  Skylake-class caches rather than re-tuned for this specific microarchitecture.
+- **OpenBLAS is not a stand-in for "the theoretical CPU peak."** Its 165
   GFLOPS at N=64 in this environment likely benefits from a hand-scheduled
   microkernel exploiting instruction-level parallelism this project's C++
   intrinsics do not attempt to replicate. Runners with more cores may also

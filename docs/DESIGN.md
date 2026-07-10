@@ -13,7 +13,7 @@ engineering-complete** reference implementation of SIMD microkernels for ML.
 | Axis               | What we are                         | What we are not |
 |--------------------|-------------------------------------|-----------------|
 | Correctness        | Validated against NumPy/PyTorch     | A toy / untested sketch |
-| Performance        | 46–48% of OpenBLAS at N≥256 (measured; see BENCHMARKS.md) | A BLAS replacement |
+| Performance        | 55–59% of OpenBLAS at N≥256 (measured; see BENCHMARKS.md) | A BLAS replacement |
 | Readability        | Commented intrinsics with rationale | Opaque assembly |
 | Usability          | `pip install`-able Python library   | An isolated demo |
 
@@ -175,7 +175,7 @@ benefit from a larger or smaller distance. This is a known tuning opportunity.
 | C++ intrinsics vs assembly   | 5–15% overhead         | Optional; use libxsmm? |
 | Fixed tile sizes             | 10–20% suboptimal      | Empirical search / BLIS auto-tune |
 | No NUMA-aware allocation     | Negligible for 1 socket| Add for multi-socket |
-| No vectorized exp() for Softmax | Softmax 3–5× slower | minimax exp() approximation |
+| No packing-skip for small N  | GEMM slower than scalar below N≈128 (see BENCHMARKS.md) | Direct unpacked micro-kernel path |
 | Single-threaded default      | Linear with core count | OpenMP (optional flag) |
 
 ---

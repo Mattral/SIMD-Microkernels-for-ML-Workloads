@@ -77,12 +77,45 @@ The 4× K-loop unrolling in both kernels ensures the out-of-order scheduler sees
 
 ## AVX-512 Status
 
-This project currently does **not** use AVX-512 in production. A stub
-`gemm_micro_6x32_avx512` exists in `avx_matmul.cpp` but is intentionally
-disabled — it accumulates into a single `__m512` per row (16 floats), when
-a correct 6×32 tile requires two `__m512` accumulators per row. The full
-dual-accumulator AVX-512 kernel is listed in ROADMAP.md as v0.8 work.
+Both GEMM kernels now dispatch to AVX-512 micro-kernels at runtime on
+AVX-512-capable hardware (see ROADMAP.md §v0.8), each using a design suited
+to its specific tile shape:
 
-On AVX-512 hardware, all 256-bit operations in this library execute at full
-throughput because the 512-bit EVEX encoding of 256-bit ops runs on the
-same ports as native AVX2.
+**`avx2_gemm_packed.cpp` (primary, Python-facing) — 8×16 tile, single accumulator/row:**
+```
+Register allocation:
+  acc0..acc7    8 ZMM   output accumulators — one per row
+  c0..c7        8 ZMM   existing C values
+  b             1 ZMM   B panel column (16 floats)
+
+  Total used:  17 / 32 ZMM registers — 15 registers of headroom
+```
+One `__m512` (16 floats) already spans the full NR512=16 tile width, so —
+unlike the reference kernel below — there is no dual-accumulator split
+needed. This is architecturally the simplest possible AVX-512 upgrade from
+the AVX2 8×8 design: same broadcast structure, twice the register width.
+
+**`avx_matmul.cpp` (secondary, reference) — 6×32 tile, dual accumulator/row:**
+```
+Register allocation:
+  c0_lo,c0_hi .. c5_lo,c5_hi   12 ZMM   accumulators: 6 rows × 2 halves
+  b_lo, b_hi                    2 ZMM   B panel (32 floats = 2 ZMM)
+  a_broadcast                   1 ZMM   scalar broadcast
+
+  Total used:  15 / 32 ZMM registers — 17 registers of headroom
+```
+A 32-column tile exceeds one ZMM's 16-float width, so each row needs two
+accumulators (lo = cols 0–15, hi = cols 16–31). This dual-accumulator
+design is exactly what an earlier, disabled version of this kernel got
+wrong: it declared a 32-wide tile but only ever wrote the "lo" half,
+silently leaving the "hi" half of every output tile untouched. Both the
+current kernel and that specific bug class are covered by permanent
+regression tests (`tests/test_gemm.cpp`, `tests/test_gemm_packed.cpp`) that
+force 100% of the test computation through the full-block path with zero
+possible edge-block masking.
+
+AVX-512's much larger physical register file (32 ZMM vs AVX2's 16 YMM)
+means neither kernel above faces the register-pressure trade-offs that
+shaped the AVX2 8×8 vs 6×16 design choice (see above) — there was
+comfortable headroom to choose the simplest correct design for each tile
+shape rather than needing to economize on registers.

@@ -71,32 +71,79 @@
 
 ---
 
-## v0.8 — AVX-512 Full Kernel (Planned)
+## v0.8 — AVX-512 Full Kernel ✅
 
-**Status of AVX-512 support today:**
-- The `avx_matmul.cpp` file contains a `gemm_micro_6x32_avx512` stub that
-  accumulates a single `__m512` (16 floats) per row. This is **incomplete** —
-  a correct 6×32 tile requires two `__m512` accumulators per row.
-- Runtime dispatch is intentionally **disabled**: `inner_NR` is fixed at 16
-  so the proven 6×16 AVX2 kernel runs on all hardware, including AVX-512 CPUs.
-  256-bit operations execute at full throughput on AVX-512 cores.
-- The `avx2_gemm_packed.cpp` kernel does not yet use AVX-512 at all.
+**Both GEMM kernels now have correct, tested, dispatched AVX-512 support:**
 
-**Planned work:**
-- [❌] `gemm_micro_6x32_avx512`: dual-accumulator 6×32 kernel (two `__m512` per row)
-- [❌] `gemm_micro_8x16_avx512`: alternative 8×16 layout matching `avx2_gemm_packed` style
-- [❌] Re-enable runtime ISA dispatch once the kernel is verified correct
-- [❌] Benchmark comparison: AVX2 vs AVX-512 on the same sizes
-- [❌] Tile-size re-tuning for Sapphire Rapids (larger L2, different port layout)
+| Kernel | File | AVX2 tile | AVX-512 tile | Status |
+|---|---|---|---|---|
+| Reference | `avx_matmul.cpp` | 6×16 (12 YMM) | 6×32, dual `__m512`/row (12 ZMM) | ✅ |
+| Primary (Python-facing) | `avx2_gemm_packed.cpp` | 8×8 (8 YMM) | 8×16, single `__m512`/row (8 ZMM) | ✅ |
+
+**Design note on the two different AVX-512 tile shapes:** the reference
+kernel's 6×32 tile needed a genuine dual-accumulator split (two `__m512`
+per row) because 32 columns exceeds one ZMM register's 16-float width —
+this is exactly the design the disabled stub got wrong (see below). The
+primary kernel's 8×16 tile needed no such split: one `__m512` already
+spans the full 16-column width, so there is no "second half" to forget by
+construction. Both were verified via standalone hand-computed unit-test
+harnesses run on real AVX-512 hardware before being wired into their
+respective dispatch paths, plus permanent forced-full-coverage regression
+tests in `tests/test_gemm.cpp` and `tests/test_gemm_packed.cpp` that choose
+M/N dimensions with zero possible edge/tail blocks — so a broken full-block
+kernel cannot be masked by scalar-fallback correctness. Both pass under
+AddressSanitizer + UndefinedBehaviorSanitizer with zero findings.
+
+**History — why this was previously disabled:** an earlier version of
+`gemm_micro_6x32_avx512` declared a 32-wide tile but only ever loaded and
+accumulated one `__m512` (16 floats) per row, silently leaving the upper 16
+output columns untouched after a `beta=0` memset (i.e., silently zeroed).
+That bug is why AVX-512 dispatch was disabled for an entire release cycle —
+`inner_NR` was fixed at 16 (AVX2-only) regardless of detected hardware.
+
+**Measured performance impact (primary Python-facing kernel, this environment):**
+
+| N   | AVX2-only (previous) | AVX-512 (now) | Speedup |
+|-----|----------------------|----------------|---------|
+| 64  | 5.4 GFLOPS  | 6.4–6.6 GFLOPS  | ~1.15–1.2× |
+| 128 | 26.9 GFLOPS | 30–35 GFLOPS    | ~1.1–1.3× |
+| 256 | 54.9 GFLOPS | 64–66 GFLOPS    | ~1.15–1.2× |
+| 512 | 58.4 GFLOPS | 73–74 GFLOPS    | ~1.25–1.3× |
+
+These numbers were captured on a shared, unpinned CI sandbox with visible
+run-to-run scheduler noise (see raw trial data in commit history); repeated
+trials cluster consistently in the ranges shown above. **Why not closer to
+2×** despite doubling SIMD width: panel packing and memory-movement overhead
+are ISA-independent — only the inner FMA loop benefits from the wider
+register, so overall speedup is bounded well below 2× by Amdahl's law. Run
+`./bench_stat --sizes 64,128,256,512 --reps 50` with `sudo cpupower
+frequency-set -g performance` and `taskset -c 0` on dedicated hardware for
+tighter, more reproducible numbers.
+
+**Remaining scope (not yet done):**
+- [❌] `isa=` parameter (in `sgemm()` / `GEMMConfig`) does not yet force a
+      specific ISA — it is currently validated but informational; the
+      runtime dispatcher always auto-selects. Forcing AVX2 explicitly on
+      AVX-512 hardware (e.g., for benchmarking) would need this wired through.
+- [❌] Tile-size re-tuning for Sapphire Rapids / Zen 4 (larger L2, different
+      port layout) — current MC/KC/NC constants were derived for Skylake-class
+      caches and are not yet re-validated on newer AVX-512 microarchitectures.
+- [❌] AVX-512 BF16/VNNI paths (separate from the FP32 work done here).
 
 ---
 
 ## v0.9 — Additional Primitives (Planned)
 - [❌] Skip panel packing below a size threshold (direct unpacked micro-kernel
-      call for small N). Measured impact: IntrinsicML is at 3.7% of OpenBLAS
-      at N=64 vs 46–48% at N≥256 — packing overhead dominates small-matrix
-      GEMM and is not yet amortised. See `docs/BENCHMARKS.md §Positioning vs
-      OpenBLAS` for the measurement that identified this.
+      call for small N). Measured impact: IntrinsicML is at 3.9% of OpenBLAS
+      at N=64 vs 55–59% at N≥256 — packing overhead dominates small-matrix
+      GEMM and is not yet amortised. AVX-512 (§v0.8) barely moved the N=64
+      number (3.7%→3.9%) precisely because this regime isn't FMA-throughput-
+      bound. In fact, at N=64 `sgemm_packed` measures *slower* than a plain
+      `-O3 -ffast-math`-compiled scalar triple loop (~0.7×) — the compiler's
+      auto-vectorization of the naive reference has no packing overhead to
+      pay, unlike the packed kernel. See `docs/BENCHMARKS.md §Positioning vs
+      OpenBLAS` and `README.md §Performance` for the measurements that
+      identified this.
 - [❌] BF16 GEMM kernel (AVX-512 BF16, relevant for modern LLM inference)
 - [❌] FP16 GEMM kernel (F16C extension)
 - [✅] Vectorized `exp` via Cody–Waite (`fast_exp_avx2` in `simd_math.hpp`, shared by GeLU/SiLU/Softmax)
@@ -138,10 +185,10 @@ between IntrinsicML and production BLAS libraries.
 
 | Limitation | Impact | Planned fix |
 |---|---|---|
-| No AVX-512 micro-kernel yet | ~20% throughput gap on AVX-512 hardware | v0.8 |
-| No assembly micro-kernel | 5–15% overhead vs hand-tuned assembly | Optional / long-term |
-| Fixed tile sizes | Sub-optimal for non-Skylake microarchitectures | v0.9 auto-tune |
-| No vectorized `exp()` in Softmax | Softmax 3–5× slower than it could be | v0.9 |
+| No hand-written assembly micro-kernel | 5–15% overhead vs hand-tuned assembly | Optional / long-term |
+| Fixed tile sizes (MC/KC/NC) | Derived for Skylake-class caches; not re-tuned for Sapphire Rapids / Zen 4 | v0.9 auto-tune |
+| Panel packing not skipped for small N | `sgemm_packed` is *slower* than a plain scalar loop at N=64 (~0.7×) — packing overhead dominates before it's amortised | v0.9 |
+| `isa=` doesn't force a specific kernel | Runtime dispatch always auto-selects; `isa=` is validated but informational | v0.9 |
 | Single-threaded default | Linear throughput scaling with cores uncaptured | OpenMP flag exists |
 | No BF16/FP16 kernels | Modern LLM inference prefers lower precision | v0.9 |
 | No NUMA-aware allocation | Throughput degrades on multi-socket systems | v1.0 |
