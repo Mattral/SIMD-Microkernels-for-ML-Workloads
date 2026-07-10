@@ -41,3 +41,18 @@ void scalar_sgemm(int M, int N, int K,
                   const float* A, int lda,
                   const float* B, int ldb,
                   float*       C, int ldc) noexcept;
+
+/**
+ * avx_matmul_isa_is_avx512 — Report whether simd_sgemm's full-block dispatch
+ * will use the 6×32 AVX-512 micro-kernel (true) or fall back to the 6×16
+ * AVX2 micro-kernel (false) on this CPU.
+ *
+ * Uses the exact same __builtin_cpu_supports checks as simd_sgemm's internal
+ * dispatch, so this is authoritative — not a separate/divergent detection
+ * path that could silently drift out of sync.
+ *
+ * Primarily useful for test diagnostics (confirming which code path a given
+ * correctness test actually exercised) and for informational reporting in
+ * build_info()-style diagnostics.
+ */
+bool avx_matmul_isa_is_avx512() noexcept;
