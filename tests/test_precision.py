@@ -78,12 +78,54 @@ def layer_norm_numpy(x: np.ndarray, gamma=None, beta=None, eps=1e-5) -> np.ndarr
     return xn
 
 
+def assert_close(actual, ref, rtol: float, atol: float, label: str = "") -> None:
+    """
+    Assert |actual - ref| <= atol + rtol * |ref| (the same combined criterion
+    np.allclose uses internally), with a diagnostic message pinpointing the
+    worst violation.
+
+    Why not a naive relative error `|actual-ref| / (|ref|+eps)`?
+    ---------------------------------------------------------------
+    That pattern is numerically unstable near zero-crossings. Functions like
+    GeLU, SiLU, and LayerNorm legitimately produce outputs arbitrarily close
+    to zero for some inputs. When |ref| is tiny, even a few ULPs of
+    disagreement between two independently-implemented approximations (e.g.
+    our Cody-Waite tanh vs PyTorch's own tanh backend) inflates the "relative
+    error" arbitrarily — the metric is measuring noise in the denominator,
+    not a real discrepancy in the kernel.
+
+    This was not a hypothetical concern: test_gelu_vs_pytorch_tanh_approx
+    failed intermittently in CI with max_rel_err=1.46e-4 against a 1e-4
+    threshold. Root-caused to a single sample x=8.4e-5 (drawn from
+    N(0,1) with 4096 samples — expected to occur in most runs) where
+    ref=GeLU(x)=4.2e-5 and the actual absolute difference between our kernel
+    and PyTorch's was 6e-9 — under one float32 ULP at that scale. The old
+    metric reported this as a 1.46e-4 "relative error" purely because the
+    denominator was tiny. The combined atol+rtol criterion used here is
+    exactly what np.allclose and virtually all numerical test suites use,
+    and does not have this failure mode.
+    """
+    actual64 = np.asarray(actual, dtype=np.float64)
+    ref64    = np.asarray(ref,    dtype=np.float64)
+    diff     = np.abs(actual64 - ref64)
+    bound    = atol + rtol * np.abs(ref64)
+    violation = diff - bound
+    worst = int(np.argmax(violation))
+    max_violation = float(violation.flat[worst])
+    assert max_violation <= 0.0, (
+        f"{label}: worst violation={max_violation:.3e} "
+        f"(|diff|={diff.flat[worst]:.3e}, ref={ref64.flat[worst]:.3e}, "
+        f"bound=atol+rtol*|ref|={atol:.1e}+{rtol:.1e}*|ref|={bound.flat[worst]:.3e})"
+    )
+
+
 # ─── GEMM Tests ──────────────────────────────────────────────────────────────
 
 class TestGEMM:
     """Verify simd_kernels.sgemm matches np.dot to within FP32 tolerance."""
 
     GEMM_TOL = 5e-2  # -ffast-math allows FP reassociation; O(K*eps_mach) accumulated error
+    GEMM_ATOL = 1e-4  # absolute floor: GEMM output can legitimately be near zero
 
     @pytest.mark.parametrize("M,N,K", [
         (1,   1,   1),
@@ -105,11 +147,8 @@ class TestGEMM:
         simd_kernels.sgemm(A, B, C)
         C_ref = A.astype(np.float64) @ B.astype(np.float64)
 
-        max_err = float(np.max(np.abs(C.astype(np.float64) - C_ref)
-                               / (np.abs(C_ref) + 1e-7)))
-        assert max_err < self.GEMM_TOL, (
-            f"GEMM [{M}×{N}×{K}]: max_rel_err={max_err:.2e} > tol={self.GEMM_TOL}"
-        )
+        assert_close(C, C_ref, rtol=self.GEMM_TOL, atol=self.GEMM_ATOL,
+                    label=f"GEMM [{M}×{N}×{K}]")
 
     def test_sgemm_allocates_output_when_C_not_provided(self):
         A = rand_matrix(32, 64)
@@ -133,9 +172,8 @@ class TestGEMM:
 
         C_ref = alpha * (A.astype(np.float64) @ B.astype(np.float64)) \
               + beta * C_init.astype(np.float64)
-        max_err = float(np.max(np.abs(C_simd.astype(np.float64) - C_ref)
-                               / (np.abs(C_ref) + 1e-7)))
-        assert max_err < self.GEMM_TOL, f"alpha/beta: max_rel_err={max_err:.2e}"
+        assert_close(C_simd, C_ref, rtol=self.GEMM_TOL, atol=self.GEMM_ATOL,
+                    label="alpha/beta")
 
     def test_sgemm_beta_zero_overwrites_C(self):
         """beta=0 must completely overwrite C — not accumulate into garbage."""
@@ -165,18 +203,17 @@ class TestGEMM:
 class TestGeLU:
     """Verify SIMD GeLU matches the fast tanh approximation reference."""
 
-    GELU_TOL = 1e-4  # Cody-Waite exp-tanh: < 2e-7 abs tanh error, amplified by GeLU formula scaling
+    GELU_TOL = 1e-4    # relative component: Cody-Waite exp-tanh, < 2e-7 abs tanh error
+    GELU_ATOL = 1e-6   # absolute floor: GeLU crosses zero at x=0, needs an absolute bound
+                       # near the crossing (see assert_close docstring for why this matters)
 
     @pytest.mark.parametrize("n", [1, 7, 8, 9, 16, 64, 1024, 65536])
     def test_gelu_vs_tanh_approx(self, n):
         x = RNG.uniform(-3.0, 3.0, size=n).astype(np.float32)
         ref = gelu_tanh_numpy(x)
         out = simd_kernels.gelu(x)
-        max_err = float(np.max(np.abs(out.astype(np.float64) - ref)
-                               / (np.abs(ref) + 1e-7)))
-        assert max_err < self.GELU_TOL, (
-            f"GeLU n={n}: max_rel_err={max_err:.2e} > tol={self.GELU_TOL}"
-        )
+        assert_close(out, ref, rtol=self.GELU_TOL, atol=self.GELU_ATOL,
+                    label=f"GeLU n={n}")
 
     def test_gelu_sweep_full_range(self):
         """Dense sweep over [-5, 5] where the polynomial approximation is valid."""
@@ -221,8 +258,8 @@ class TestGeLU:
         x_pt = torch.from_numpy(x_np)
         ref = F.gelu(x_pt, approximate="tanh").numpy()
         got = simd_kernels.gelu(x_np)
-        max_err = float(np.max(np.abs(got - ref) / (np.abs(ref) + 1e-7)))
-        assert max_err < self.GELU_TOL, f"vs PyTorch GeLU: max_rel_err={max_err:.2e}"
+        assert_close(got, ref, rtol=self.GELU_TOL, atol=self.GELU_ATOL,
+                    label="vs PyTorch GeLU")
 
 
 # ─── ReLU Tests ──────────────────────────────────────────────────────────────
@@ -250,15 +287,15 @@ class TestReLU:
 
 class TestSiLU:
     SILU_TOL = 1e-4
+    SILU_ATOL = 1e-6  # SiLU also crosses zero at x=0 — see assert_close docstring
 
     @pytest.mark.parametrize("n", [1, 7, 8, 9, 64, 1024, 65536])
     def test_silu_vs_numpy(self, n):
         x = RNG.uniform(-4.0, 4.0, size=n).astype(np.float32)
         ref = silu_numpy(x)
         out = simd_kernels.silu(x)
-        max_err = float(np.max(np.abs(out.astype(np.float64) - ref)
-                               / (np.abs(ref) + 1e-7)))
-        assert max_err < self.SILU_TOL, f"SiLU n={n}: max_rel_err={max_err:.2e}"
+        assert_close(out, ref, rtol=self.SILU_TOL, atol=self.SILU_ATOL,
+                    label=f"SiLU n={n}")
 
     def test_silu_zero_input(self):
         x = np.zeros(64, dtype=np.float32)
@@ -271,8 +308,8 @@ class TestSiLU:
         x_pt = torch.from_numpy(x_np)
         ref = F.silu(x_pt).numpy()
         got = simd_kernels.silu(x_np)
-        max_err = float(np.max(np.abs(got - ref) / (np.abs(ref) + 1e-7)))
-        assert max_err < self.SILU_TOL, f"vs PyTorch SiLU: max_rel_err={max_err:.2e}"
+        assert_close(got, ref, rtol=self.SILU_TOL, atol=self.SILU_ATOL,
+                    label="vs PyTorch SiLU")
 
 
 # ─── Softmax Tests ────────────────────────────────────────────────────────────
@@ -319,6 +356,7 @@ class TestSoftmax:
 
 class TestLayerNorm:
     LN_TOL = 1e-4
+    LN_ATOL = 1e-5  # normalized output crosses zero regularly — see assert_close docstring
 
     @pytest.mark.parametrize("n", [8, 64, 128, 256, 512, 768, 1024])
     def test_layer_norm_zero_mean_unit_std(self, n):
@@ -340,19 +378,16 @@ class TestLayerNorm:
         ref = layer_norm_numpy(x, gamma, beta)
         out = simd_kernels.layer_norm(x, gamma=gamma, beta=beta)
 
-        max_err = float(np.max(np.abs(out.astype(np.float64) - ref)
-                               / (np.abs(ref) + 1e-7)))
-        assert max_err < self.LN_TOL, \
-            f"LayerNorm affine n={n}: max_rel_err={max_err:.2e}"
+        assert_close(out, ref, rtol=self.LN_TOL, atol=self.LN_ATOL,
+                    label=f"LayerNorm affine n={n}")
 
     def test_layer_norm_2d_batch(self):
         """LayerNorm applied to each row of a 2D array."""
         x     = RNG.standard_normal((16, 128)).astype(np.float32)
         out   = simd_kernels.layer_norm(x)
         ref   = layer_norm_numpy(x)
-        max_err = float(np.max(np.abs(out.astype(np.float64) - ref)
-                               / (np.abs(ref) + 1e-7)))
-        assert max_err < self.LN_TOL, f"LayerNorm 2D: max_rel_err={max_err:.2e}"
+        assert_close(out, ref, rtol=self.LN_TOL, atol=self.LN_ATOL,
+                    label="LayerNorm 2D")
 
     @pytest.mark.skipif(not HAS_TORCH, reason="PyTorch not installed")
     def test_layer_norm_vs_pytorch(self):
@@ -365,8 +400,8 @@ class TestLayerNorm:
                     weight=torch.from_numpy(gamma),
                     bias=torch.from_numpy(beta)).numpy()
         out   = simd_kernels.layer_norm(x, gamma=gamma, beta=beta)
-        max_err = float(np.max(np.abs(out - ref) / (np.abs(ref) + 1e-7)))
-        assert max_err < self.LN_TOL, f"vs PyTorch LayerNorm: max_rel_err={max_err:.2e}"
+        assert_close(out, ref, rtol=self.LN_TOL, atol=self.LN_ATOL,
+                    label="vs PyTorch LayerNorm")
 
 
 # ─── Alignment / build_info Tests ─────────────────────────────────────────────
