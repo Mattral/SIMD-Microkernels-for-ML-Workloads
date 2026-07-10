@@ -103,9 +103,63 @@ static bool test_beta_zero_overwrites_poison() {
     return pass;
 }
 
+/**
+ * test_gemm_packed_avx512_full_coverage — Forces 100% of the output through
+ * the full-block micro-kernel path, with ZERO edge/tail blocks possible,
+ * regardless of which ISA sgemm_packed's runtime dispatch selects.
+ *
+ * MR512 == MR (both 8), so M only needs to be a multiple of 8 to guarantee
+ * full row coverage on either path. N must be a common multiple of NR=8
+ * (AVX2) and NR512=16 (AVX-512) so that whichever kernel actually runs,
+ * every output column comes from a full-width micro-kernel call — none can
+ * be silently "saved" by the scalar edge-block fallback masking a bug in
+ * the wide kernel.
+ *
+ * Unlike avx_matmul.cpp's 6×32 kernel, inner_kernel_8x16_avx512 has no
+ * dual-accumulator split (one ZMM spans the full NR512=16 width), so there
+ * is no "second half never written" failure mode possible by construction.
+ * The residual risk this test targets is dispatch wiring: wrong buffer
+ * sizing, wrong packed-block indexing, or routing to the wrong kernel/stride
+ * combination — any of which would produce either wrong values or an
+ * out-of-bounds access (also why this path is additionally verified under
+ * AddressSanitizer — see .github/workflows/ci.yml sanitizers job).
+ */
+static bool test_gemm_packed_avx512_full_coverage() {
+    const int M = 80;    // = 10 * MR(8) = 10 * MR512(8): zero remainder rows, either ISA
+    const int N = 160;   // = 20 * NR(8) = 10 * NR512(16): zero remainder cols, either ISA
+    const int K = 97;    // arbitrary, not a multiple of anything convenient
+
+    auto A     = make_aligned_array<float>(static_cast<std::size_t>(M) * K);
+    auto B     = make_aligned_array<float>(static_cast<std::size_t>(K) * N);
+    auto C_ref = make_aligned_array<float>(static_cast<std::size_t>(M) * N);
+    auto C_got = make_aligned_array<float>(static_cast<std::size_t>(M) * N);
+
+    fill_random(A.get(), M * K, /*seed=*/33);
+    fill_random(B.get(), K * N, /*seed=*/44);
+    std::fill(C_ref.get(), C_ref.get() + M * N, 0.0f);
+    std::fill(C_got.get(), C_got.get() + M * N, 0.0f);
+
+    naive_sgemm(M, N, K, 1.0f, A.get(), K, B.get(), N, 0.0f, C_ref.get(), N);
+    simd_ml::gemm::sgemm_packed(M, N, K, 1.0f, A.get(), K, B.get(), N, 0.0f, C_got.get(), N);
+
+    float max_err = 0.0f;
+    for (int i = 0; i < M * N; ++i)
+        max_err = std::max(max_err, std::fabs(C_got[i] - C_ref[i]));
+
+    bool pass = (max_err < 1e-4f);
+    printf("  AVX-512 full-coverage [%dx%dx%d]  isa=%s  max_abs=%.2e  %s\n",
+           M, N, K,
+           simd_ml::gemm::gemm_packed_isa_is_avx512() ? "avx512(8x16)" : "avx2(8x8)",
+           max_err, pass ? "PASS" : "FAIL");
+    return pass;
+}
+
 int run_gemm_packed_tests() {
     printf("\n── Packed GEMM Correctness Tests ──\n");
     bool all_pass = true;
+
+    printf("  Runtime ISA: %s\n",
+           simd_ml::gemm::gemm_packed_isa_is_avx512() ? "AVX-512 (8x16 kernel)" : "AVX2 (8x8 kernel)");
 
     printf(" Standard sizes (α=1, β=0):\n");
     for (int s : {1, 7, 8, 9, 16, 127, 128, 129, 256, 512, 1024})
@@ -122,6 +176,9 @@ int run_gemm_packed_tests() {
 
     printf(" Edge: beta=0 must overwrite poisoned C:\n");
     all_pass &= test_beta_zero_overwrites_poison();
+
+    printf(" AVX-512 dual-kernel dispatch regression guard:\n");
+    all_pass &= test_gemm_packed_avx512_full_coverage();
 
     printf("  Overall: %s\n", all_pass ? "ALL PASS" : "SOME FAILURES");
     return all_pass ? 0 : 1;
