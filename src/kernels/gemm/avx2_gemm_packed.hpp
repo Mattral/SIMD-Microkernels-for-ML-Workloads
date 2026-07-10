@@ -20,6 +20,15 @@ static constexpr int KC = 256;
 static constexpr int MC = 128;
 static constexpr int NC = 2048;
 
+// ─── AVX-512 tile constants ───────────────────────────────────────────────────
+// MR512 == MR: pack_a_panel is NR-independent so it is reused verbatim for
+// both ISA paths. NR512 = 16 (one full __m512 = 16 floats) — a SINGLE
+// accumulator per row, not a dual-half split like avx_matmul.cpp's 6×32
+// kernel. This deliberately avoids the "second half never written" bug
+// class entirely: there is no second half to forget, by construction.
+static constexpr int MR512 = MR;   // = 8
+static constexpr int NR512 = 16;
+
 // Reference: Goto, K. & van de Geijn, R. (2008). Anatomy of High-Performance
 // Matrix Multiplication. ACM Transactions on Mathematical Software, 34(3).
 
@@ -45,6 +54,36 @@ void inner_kernel_8x8(const float* A_packed,
                        float*       C, int ldc,
                        int          k_rem,
                        float        alpha) noexcept;
+
+// ─── AVX-512 8×16 micro-kernel (parallel path, independent of the AVX2 one) ──
+
+/**
+ * pack_b_panel_avx512 — Reorder B[k × n] into NR512-column-major panel layout.
+ * Identical in spirit to pack_b_panel, but blocks on NR512=16 instead of NR=8.
+ */
+void pack_b_panel_avx512(const float* B, int ldb, int k, int n, float* B_packed);
+
+/**
+ * inner_kernel_8x16_avx512 — Compute C[0..7][0..15] += alpha * A × B
+ *
+ * Same broadcast-based structure as inner_kernel_8x8 (8 rows, one accumulator
+ * per row), but each accumulator is a full __m512 (16 floats) instead of a
+ * __m256 (8 floats) — doubling throughput per k-step with no dual-accumulator
+ * complexity, since one ZMM register already spans the full NR512 width.
+ */
+void inner_kernel_8x16_avx512(const float* A_packed,
+                              const float* B_packed,
+                              float*       C, int ldc,
+                              int          k_rem,
+                              float        alpha) noexcept;
+
+/**
+ * gemm_packed_isa_is_avx512 — Report whether sgemm_packed's full-block
+ * dispatch will use the 8×16 AVX-512 micro-kernel (true) or the 8×8 AVX2
+ * micro-kernel (false) on this CPU. Same detection logic as sgemm_packed's
+ * internal dispatch — authoritative, not a separate/divergent check.
+ */
+bool gemm_packed_isa_is_avx512() noexcept;
 
 // ─── Main GEMM entry point ────────────────────────────────────────────────────
 
