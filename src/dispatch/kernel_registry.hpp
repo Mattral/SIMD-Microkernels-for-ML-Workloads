@@ -86,7 +86,9 @@ void sgemm(int M, int N, int K,
 
 /**
  * detected_isa — return a string identifying the selected ISA at runtime.
- * Values: "avx2", "avx512_host_avx2_kernel", "sse42", "scalar".
+ * Values: "avx2", "avx512", "sse42", "scalar". Reflects sgemm_packed's own
+ * internal AVX-512/AVX2 choice (see avx2_gemm_packed.cpp:
+ * gemm_packed_isa_is_avx512()) — not a separately-decided label.
  */
 const char* detected_isa() noexcept;
 

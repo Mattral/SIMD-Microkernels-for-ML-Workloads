@@ -5,9 +5,14 @@
  * the KernelRegistry with the best available implementations.
  *
  * Decision tree:
- *   AVX-512F+DQ → falls back to AVX2 (AVX-512 GEMM is available but the
- *                  avx2_gemm_packed kernel is currently more complete)
- *   AVX2 + FMA  → simd_ml::gemm::sgemm_packed + activations::gelu_avx2
+ *   AVX2 + FMA  → simd_ml::gemm::sgemm_packed + activations::gelu_avx2.
+ *                 sgemm_packed has its OWN internal runtime dispatch between
+ *                 an 8×16 AVX-512 micro-kernel and an 8×8 AVX2 micro-kernel
+ *                 (see avx2_gemm_packed.cpp: gemm_packed_isa_is_avx512()).
+ *                 The isa_label below reflects that internal choice, queried
+ *                 once here (CPU features don't change at runtime, so a
+ *                 single query at registry-population time is equivalent to
+ *                 querying on every call, without the per-call overhead).
  *   SSE4.2      → naive scalar GEMM (SSE GEMM not yet implemented)
  *   fallback    → naive scalar GEMM
  *
@@ -68,13 +73,14 @@ const KernelRegistry& get_kernels() noexcept {
     std::call_once(g_registry_once, [] {
         CpuFeatures f = CpuFeatures::detect();
 
-        // Note: even when AVX-512 is available, we currently use the AVX2
-        // packed GEMM as it has a more complete 5-loop implementation.
-        // The avx_matmul.cpp AVX-512 path dispatches internally at runtime.
+        // Note: sgemm_packed (avx2_gemm_packed.cpp) has its own internal
+        // AVX-512/AVX2 dispatch. Query it directly so isa_label reflects
+        // reality rather than a separately-maintained (and easily stale)
+        // duplicate of that decision.
         if (f.has_avx2 && f.has_fma) {
             g_registry.sgemm     = &gemm::sgemm_packed;
             g_registry.gelu      = &activations::gelu_avx2;  // global namespace
-            g_registry.isa_label = f.has_avx512f ? "avx512_host_avx2_kernel" : "avx2";
+            g_registry.isa_label = gemm::gemm_packed_isa_is_avx512() ? "avx512" : "avx2";
         } else if (f.has_sse42) {
             g_registry.sgemm     = &gemm_ref::naive_sgemm;
             g_registry.gelu      = nullptr;

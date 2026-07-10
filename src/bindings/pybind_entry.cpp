@@ -450,11 +450,14 @@ np.ndarray[float32] of shape [M, N] — same object as C if provided.
 
 Notes
 -----
-Uses a Goto/BLIS-style packed GEMM with register blocking (8×8 micro-tile),
-panel packing, and AVX2 FMA intrinsics. Achieves 46–48% of OpenBLAS
-single-threaded throughput for N≥256 (measured; see docs/BENCHMARKS.md).
-Small matrices (N≤64) lag further behind (~4%) because packing overhead
-is not yet amortised at that size — see DESIGN.md §7 for the full gap analysis.
+Uses a Goto/BLIS-style packed GEMM with register blocking (8×8 AVX2 or
+8×16 AVX-512 micro-tile, auto-dispatched at runtime), panel packing, and
+FMA intrinsics. Achieves 55–59% of OpenBLAS single-threaded throughput for
+N≥256 (measured; see docs/BENCHMARKS.md). Small matrices (N≤64) lag further
+behind (~4%) and can even be slower than a plain scalar loop — packing
+overhead dominates and is not yet amortised at that size, and wider SIMD
+doesn't help a packing-bound regime — see DESIGN.md §7 for the full gap
+analysis.
 )doc");
 
     m.def("gelu_inplace", &py_gelu_inplace,
