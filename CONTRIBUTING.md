@@ -156,6 +156,21 @@ Add to `pybind_entry.cpp`, `simd_kernels.pyi`, and document in `docs/api/python_
 **Step 8: Python precision test**
 Add a `TestMyKernel` class to `tests/test_precision.py`. Include a `@pytest.mark.skipif(not HAS_TORCH, ...)` cross-check against PyTorch if applicable.
 
+**Never use a naive relative-error metric** — `|actual - ref| / (|ref| + eps)`
+with a tiny `eps` (e.g. `1e-7`) is numerically unstable for any function that
+crosses zero (GeLU, SiLU, LayerNorm, tanh-based activations all qualify).
+When `ref` is legitimately near zero, a few ULPs of disagreement between two
+independent implementations get amplified into an arbitrarily large
+"relative error" that has nothing to do with kernel correctness. This is not
+theoretical: `test_gelu_vs_pytorch_tanh_approx` used exactly this pattern and
+failed on **68% of random seeds** when stress-tested, despite the underlying
+kernel being correct to within a few ULPs of PyTorch's own implementation.
+Always use the shared `assert_close(actual, ref, rtol, atol, label=...)`
+helper in `tests/test_precision.py`, which implements the combined
+`|diff| <= atol + rtol*|ref|` criterion (the same one `np.allclose` uses).
+Pick `atol` based on the kernel's documented absolute error bound near zero
+(typically `1e-5` to `1e-6` for the tanh-based activations in this project).
+
 **Step 9: Run all tests**
 ```bash
 cmake --build build --parallel
