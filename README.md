@@ -87,16 +87,31 @@ docker run --rm intrinsicml ./bench
 
 ## Performance
 
-Typical single-core numbers on an x86-64 desktop with AVX2 at 3.5 GHz:
+Typical single-core numbers on an x86-64 CPU with AVX2/AVX-512 at ~2.1 GHz
+(this environment; run your own benchmarks — see below). "Speedup vs Scalar"
+compares `sgemm_packed` (the kernel Python's `sk.sgemm()` actually calls)
+against a plain triple-loop reference, both compiled with `-O3 -ffast-math`:
 
 | Kernel | Size | Speedup vs Scalar | vs OpenBLAS (1T) |
 |--------|------|-------------------|------------------|
-| GEMM   | 64×64 | ~5× | ~4% |
-| GEMM   | 256×256 | ~11× | ~48% |
-| GEMM   | 512×512 | ~8× | ~46% |
+| GEMM   | 64×64 | ~0.7× (see note) | ~4% |
+| GEMM   | 128×128 | ~10× | ~29% |
+| GEMM   | 256×256 | ~26× | ~55% |
+| GEMM   | 512×512 | N/A (scalar too slow to measure) | ~59% |
 | GeLU   | 1M elements | ~6–10× | N/A |
 
-The gap to OpenBLAS is well-understood and intentional — see [`docs/DESIGN.md §7`](docs/DESIGN.md#7-explicitly-acknowledged-gaps-vs-production-blas) and the full measured comparison in [`docs/BENCHMARKS.md § Positioning vs OpenBLAS`](docs/BENCHMARKS.md#positioning-vs-openblas-captured-2026-07-ci-environment). Small matrices (≤64) are the largest gap today — packing overhead dominates before it's amortised. Run `./bench_stat --sizes 64,128,256,512,1024 --reps 30` with `-DBENCH_OPENBLAS=ON` on your hardware for reproducible numbers.
+**Honest note on N=64:** the packed kernel is measurably *slower* than a
+plain scalar triple-loop at this size — GCC's `-O3 -ffast-math` auto-vectorizes
+the simple reference loop well enough that panel-packing overhead (which the
+packed kernel pays regardless of size) makes it a net loss until N≥128. This
+is the same small-matrix packing-overhead finding documented in
+[`docs/BENCHMARKS.md § Positioning vs OpenBLAS`](docs/BENCHMARKS.md#positioning-vs-openblas-captured-2026-07-ci-environment) — not a bug, but a
+concrete argument for the "skip packing below a size threshold" item tracked
+in [`docs/ROADMAP.md §v0.9`](docs/ROADMAP.md).
+
+The GEMM kernel auto-dispatches to an AVX-512 8×16 micro-kernel on AVX-512-capable
+hardware (falling back to AVX2 8×8 otherwise) — see [`docs/ROADMAP.md §v0.8`](docs/ROADMAP.md).
+The gap to OpenBLAS is well-understood and intentional — see [`docs/DESIGN.md §7`](docs/DESIGN.md#7-explicitly-acknowledged-gaps-vs-production-blas). Run `./bench_stat --sizes 64,128,256,512,1024 --reps 30` with `-DBENCH_OPENBLAS=ON` on your hardware for reproducible numbers.
 
 For rigorous comparison with CPU frequency locked:
 ```bash
