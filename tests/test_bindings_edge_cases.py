@@ -212,15 +212,30 @@ class TestGEMMConfig:
 
 
 class TestSgemmIsaKwarg:
-    """Tests for the isa= keyword argument on sgemm() directly."""
+    """Tests for the isa= keyword argument on sgemm() — genuine per-call
+    kernel forcing (not just accepted-and-ignored), see ROADMAP.md §v0.8."""
 
-    def test_valid_isa_values_accepted(self):
+    def test_auto_and_simd_isa_values_accepted(self):
         rng = np.random.default_rng(10)
         A = rng.standard_normal((16, 16)).astype(np.float32)
         B = rng.standard_normal((16, 16)).astype(np.float32)
-        for isa in ["", "avx2", "avx512", "scalar"]:
+        for isa in ["", "avx2", "avx512"]:
+            if isa == "avx512" and not simd_kernels.avx512_available():
+                continue  # would correctly raise on non-AVX-512 hardware
             C = simd_kernels.sgemm(A, B, isa=isa)
             assert C.shape == (16, 16)
+
+    def test_scalar_isa_raises_not_implemented(self):
+        """isa='scalar' is a recognized value but not yet wired to a forced
+        full-matrix scalar path — must raise a clear error, not silently
+        fall back to auto (which would be a transparency violation: the
+        user explicitly asked for scalar and got SIMD instead, unannounced).
+        """
+        rng = np.random.default_rng(12)
+        A = rng.standard_normal((8, 8)).astype(np.float32)
+        B = rng.standard_normal((8, 8)).astype(np.float32)
+        with pytest.raises(RuntimeError, match="not yet implemented"):
+            simd_kernels.sgemm(A, B, isa="scalar")
 
     def test_invalid_isa_raises(self):
         rng = np.random.default_rng(11)
@@ -228,3 +243,73 @@ class TestSgemmIsaKwarg:
         B = rng.standard_normal((8, 8)).astype(np.float32)
         with pytest.raises(RuntimeError, match="isa must be one of"):
             simd_kernels.sgemm(A, B, isa="cuda")
+
+    def test_avx512_requested_on_unsupported_hardware_raises(self):
+        """Cannot directly simulate missing AVX-512 hardware in-process, so
+        this test only runs its assertion when avx512_available() is False
+        (e.g. on a CI runner without AVX-512) — otherwise it's a no-op,
+        documenting the expected behavior for future readers either way.
+        """
+        rng = np.random.default_rng(13)
+        A = rng.standard_normal((8, 8)).astype(np.float32)
+        B = rng.standard_normal((8, 8)).astype(np.float32)
+        if not simd_kernels.avx512_available():
+            with pytest.raises(RuntimeError, match="does not support"):
+                simd_kernels.sgemm(A, B, isa="avx512")
+
+    def test_forced_avx2_and_avx512_agree_numerically(self):
+        """Both kernels must independently compute the same GEMM correctly —
+        this is a genuine cross-check between two different code paths, not
+        just each against a reference (see also the C++-level
+        test_gemm_isa_override in tests/test_gemm_packed.cpp for a direct,
+        non-numerical proof that the override actually changes dispatch).
+        """
+        if not simd_kernels.avx512_available():
+            pytest.skip("AVX-512 not available on this machine")
+        rng = np.random.default_rng(14)
+        A = rng.standard_normal((96, 128)).astype(np.float32)
+        B = rng.standard_normal((128, 96)).astype(np.float32)
+        C_avx2 = simd_kernels.sgemm(A, B, isa="avx2")
+        C_avx512 = simd_kernels.sgemm(A, B, isa="avx512")
+        assert np.allclose(C_avx2, C_avx512, rtol=1e-4, atol=1e-4)
+
+    def test_isa_override_does_not_leak_to_subsequent_calls(self):
+        """A forced isa= on one call must not affect later calls that don't
+        specify isa= — this is the per-call (not sticky/global) contract.
+        """
+        rng = np.random.default_rng(15)
+        A = rng.standard_normal((32, 32)).astype(np.float32)
+        B = rng.standard_normal((32, 32)).astype(np.float32)
+
+        C_before = simd_kernels.sgemm(A, B)          # auto, establishes baseline
+        simd_kernels.sgemm(A, B, isa="avx2")           # forced call, should not leak
+        C_after = simd_kernels.sgemm(A, B)            # auto again
+
+        assert np.array_equal(C_before, C_after), \
+            "isa= override leaked into a subsequent auto-detect call"
+
+    def test_gemmconfig_isa_forces_kernel_too(self):
+        """GEMMConfig(isa=...) delegates to sgemm's isa= — verify it's
+        actually wired through, not just stored and ignored.
+        """
+        rng = np.random.default_rng(16)
+        A = rng.standard_normal((32, 32)).astype(np.float32)
+        B = rng.standard_normal((32, 32)).astype(np.float32)
+
+        gemm_scalar_request = simd_kernels.GEMMConfig(isa="scalar")
+        with pytest.raises(RuntimeError, match="not yet implemented"):
+            gemm_scalar_request(A, B)
+
+
+class TestAvx512Available:
+    """Tests for the avx512_available() hardware-capability diagnostic."""
+
+    def test_returns_bool(self):
+        result = simd_kernels.avx512_available()
+        assert isinstance(result, bool)
+
+    def test_consistent_with_detected_isa(self):
+        """If detected_isa() reports 'avx512', avx512_available() must be
+        True — these two diagnostics must never contradict each other."""
+        if simd_kernels.detected_isa() == "avx512":
+            assert simd_kernels.avx512_available() is True

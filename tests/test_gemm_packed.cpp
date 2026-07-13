@@ -154,6 +154,95 @@ static bool test_gemm_packed_avx512_full_coverage() {
     return pass;
 }
 
+/**
+ * test_gemm_isa_override — Verifies set_gemm_isa_override genuinely changes
+ * sgemm_packed's kernel dispatch (not inferred from numeric equivalence,
+ * which could mask a broken override on hardware where auto and forced
+ * happen to coincide — checked directly via gemm_packed_isa_is_avx512()).
+ *
+ * Also verifies numerical correctness under each forced path and that
+ * resetting the override restores auto-detection.
+ */
+static bool test_gemm_isa_override() {
+    using namespace simd_ml::gemm;
+    bool all_pass = true;
+
+    const bool hw_avx512 = gemm_packed_avx512_hardware_available();
+
+    // Force AVX2: is_avx512() must report false regardless of hardware
+    set_gemm_isa_override("avx2");
+    bool avx2_forced_ok = !gemm_packed_isa_is_avx512();
+    printf("  force avx2  -> is_avx512()==false: %s\n", avx2_forced_ok ? "PASS" : "FAIL");
+    all_pass &= avx2_forced_ok;
+
+    // Numerical correctness while forced to AVX2
+    {
+        const int N = 96;  // multiple of 8 (AVX2 NR) with edge-block coverage too
+        auto A = make_aligned_array<float>(N * N);
+        auto B = make_aligned_array<float>(N * N);
+        auto C = make_aligned_array<float>(N * N);
+        auto C_ref = make_aligned_array<float>(N * N);
+        fill_random(A.get(), N * N, 55);
+        fill_random(B.get(), N * N, 66);
+        naive_sgemm(N, N, N, 1.0f, A.get(), N, B.get(), N, 0.0f, C_ref.get(), N);
+        sgemm_packed(N, N, N, 1.0f, A.get(), N, B.get(), N, 0.0f, C.get(), N);
+        float max_err = 0.0f;
+        for (int i = 0; i < N * N; ++i)
+            max_err = std::max(max_err, std::fabs(C[i] - C_ref[i]));
+        bool ok = max_err < 1e-4f;
+        printf("  force avx2  numerical correctness [%dx%d]: max_abs=%.2e  %s\n",
+               N, N, max_err, ok ? "PASS" : "FAIL");
+        all_pass &= ok;
+    }
+
+    // Force AVX-512: only meaningful to assert true if hardware actually
+    // supports it (the function is defensively safe on unsupported hw —
+    // see header doc comment — so it would correctly report false there).
+    set_gemm_isa_override("avx512");
+    bool avx512_forced_ok = hw_avx512 ? gemm_packed_isa_is_avx512()
+                                       : !gemm_packed_isa_is_avx512();
+    printf("  force avx512 -> is_avx512()==%-5s: %s  (hw_avx512=%s)\n",
+           hw_avx512 ? "true" : "false", avx512_forced_ok ? "PASS" : "FAIL",
+           hw_avx512 ? "yes" : "no");
+    all_pass &= avx512_forced_ok;
+
+    if (hw_avx512) {
+        const int N = 96;
+        auto A = make_aligned_array<float>(N * N);
+        auto B = make_aligned_array<float>(N * N);
+        auto C = make_aligned_array<float>(N * N);
+        auto C_ref = make_aligned_array<float>(N * N);
+        fill_random(A.get(), N * N, 77);
+        fill_random(B.get(), N * N, 88);
+        naive_sgemm(N, N, N, 1.0f, A.get(), N, B.get(), N, 0.0f, C_ref.get(), N);
+        sgemm_packed(N, N, N, 1.0f, A.get(), N, B.get(), N, 0.0f, C.get(), N);
+        float max_err = 0.0f;
+        for (int i = 0; i < N * N; ++i)
+            max_err = std::max(max_err, std::fabs(C[i] - C_ref[i]));
+        bool ok = max_err < 1e-4f;
+        printf("  force avx512 numerical correctness [%dx%d]: max_abs=%.2e  %s\n",
+               N, N, max_err, ok ? "PASS" : "FAIL");
+        all_pass &= ok;
+    }
+
+    // Reset must restore auto-detection (raw hardware capability)
+    set_gemm_isa_override("");
+    bool reset_ok = gemm_packed_isa_is_avx512() == hw_avx512;
+    printf("  reset override -> matches raw hw (%s): %s\n",
+           hw_avx512 ? "avx512" : "avx2", reset_ok ? "PASS" : "FAIL");
+    all_pass &= reset_ok;
+
+    // Unknown override string must be treated as auto (defensive default)
+    set_gemm_isa_override("nonsense");
+    bool unknown_defaults_to_auto = gemm_packed_isa_is_avx512() == hw_avx512;
+    printf("  unknown override defaults to auto:    %s\n",
+           unknown_defaults_to_auto ? "PASS" : "FAIL");
+    all_pass &= unknown_defaults_to_auto;
+    set_gemm_isa_override(nullptr);  // leave clean for subsequent tests
+
+    return all_pass;
+}
+
 int run_gemm_packed_tests() {
     printf("\n── Packed GEMM Correctness Tests ──\n");
     bool all_pass = true;
@@ -179,6 +268,9 @@ int run_gemm_packed_tests() {
 
     printf(" AVX-512 dual-kernel dispatch regression guard:\n");
     all_pass &= test_gemm_packed_avx512_full_coverage();
+
+    printf(" ISA override mechanism (isa= forcing):\n");
+    all_pass &= test_gemm_isa_override();
 
     printf("  Overall: %s\n", all_pass ? "ALL PASS" : "SOME FAILURES");
     return all_pass ? 0 : 1;
