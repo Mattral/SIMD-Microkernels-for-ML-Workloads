@@ -121,14 +121,26 @@ frequency-set -g performance` and `taskset -c 0` on dedicated hardware for
 tighter, more reproducible numbers.
 
 **Remaining scope (not yet done):**
-- [❌] `isa=` parameter (in `sgemm()` / `GEMMConfig`) does not yet force a
-      specific ISA — it is currently validated but informational; the
-      runtime dispatcher always auto-selects. Forcing AVX2 explicitly on
-      AVX-512 hardware (e.g., for benchmarking) would need this wired through.
 - [❌] Tile-size re-tuning for Sapphire Rapids / Zen 4 (larger L2, different
       port layout) — current MC/KC/NC constants were derived for Skylake-class
       caches and are not yet re-validated on newer AVX-512 microarchitectures.
 - [❌] AVX-512 BF16/VNNI paths (separate from the FP32 work done here).
+
+**Since resolved:** `isa=` (in `sgemm()` / `GEMMConfig`) now genuinely forces
+a specific kernel per-call — `set_gemm_isa_override`/`get_gemm_isa_override`
+(thread_local, RAII-guarded around each call so it never leaks into
+subsequent calls) in `avx2_gemm_packed.cpp`, wired through
+`pybind_entry.cpp`. Requesting `isa="avx512"` on hardware without
+AVX-512F+DQ raises `RuntimeError` (checked against
+`gemm_packed_avx512_hardware_available()`, also exposed to Python as
+`simd_kernels.avx512_available()`). `isa="scalar"` is a recognized value
+but raises `RuntimeError` ("not yet implemented") rather than silently
+falling back, since no forced full-matrix scalar path exists yet. Verified
+via a direct C++ test (`test_gemm_isa_override` in
+`tests/test_gemm_packed.cpp`) that proves the override changes
+`gemm_packed_isa_is_avx512()`'s return value in both directions — not
+inferred from numeric equivalence, which could mask a broken override on
+hardware where auto-detect and a forced choice happen to coincide.
 
 ---
 
@@ -188,7 +200,6 @@ between IntrinsicML and production BLAS libraries.
 | No hand-written assembly micro-kernel | 5–15% overhead vs hand-tuned assembly | Optional / long-term |
 | Fixed tile sizes (MC/KC/NC) | Derived for Skylake-class caches; not re-tuned for Sapphire Rapids / Zen 4 | v0.9 auto-tune |
 | Panel packing not skipped for small N | `sgemm_packed` is *slower* than a plain scalar loop at N=64 (~0.7×) — packing overhead dominates before it's amortised | v0.9 |
-| `isa=` doesn't force a specific kernel | Runtime dispatch always auto-selects; `isa=` is validated but informational | v0.9 |
 | Single-threaded default | Linear throughput scaling with cores uncaptured | OpenMP flag exists |
 | No BF16/FP16 kernels | Modern LLM inference prefers lower precision | v0.9 |
 | No NUMA-aware allocation | Throughput degrades on multi-socket systems | v1.0 |

@@ -30,9 +30,13 @@ def sgemm(
     C     : ndarray[float32], shape [M, N], optional (allocated if None)
     alpha : float scalar, default 1.0
     beta  : float scalar, default 0.0 (0 = overwrite C)
-    isa   : str, default "" — ISA hint: "", "avx2", "avx512", or "scalar".
-            Validated but currently informational; the runtime dispatcher
-            (kernel_registry) selects the implementation automatically.
+    isa   : str, default "" — forces this call to use a specific kernel:
+            "" (auto-detect, default), "avx2", or "avx512". Requesting
+            "avx512" on hardware without AVX-512F+DQ raises RuntimeError
+            (check avx512_available() first). "scalar" is a recognized
+            value but raises RuntimeError ("not yet implemented") rather
+            than silently falling back. This override applies only to
+            this call, not subsequent ones.
 
     Returns
     -------
@@ -167,6 +171,17 @@ def build_info() -> dict[str, str | bool]:
 
 def detected_isa() -> str:
     """Return the runtime-detected ISA label: 'avx512', 'avx2', 'sse42', or 'scalar'."""
+    ...
+
+
+def avx512_available() -> bool:
+    """
+    Return True if this CPU supports AVX-512F+DQ (required by sgemm_packed's
+    8x16 micro-kernel), independent of any isa= override on a given call.
+
+    Check this before requesting isa='avx512' explicitly to avoid a
+    RuntimeError on unsupported hardware.
+    """
     ...
 
 

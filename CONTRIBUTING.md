@@ -31,7 +31,6 @@ See `docs/setup.md` for full prerequisites and optional flags.
 | Area | Status | Entry point |
 |---|---|---|
 | Skip panel packing for small N (packed kernel is slower than scalar at N=64) | 🔴 Planned v0.9 | `src/kernels/gemm/avx2_gemm_packed.cpp` |
-| `isa=` forcing a specific kernel (currently informational only) | 🔴 Planned v0.9 | `src/bindings/pybind_entry.cpp`, `kernel_registry.hpp` |
 | BF16/FP16 GEMM | 🔴 Planned v0.9 | new file under `src/kernels/gemm/` |
 | Auto-tuned tile sizes (MC/KC/NC re-derived for Sapphire Rapids / Zen 4) | 🔴 Planned v0.9 | `src/kernels/gemm/avx2_gemm_packed.hpp` |
 | Benchmark results on new hardware | 🟡 Always welcome | `docs/BENCHMARKS.md` |

@@ -56,26 +56,43 @@ Auto-tuned tile selection is planned (`docs/ROADMAP.md §v0.9`).
 
 ```python
 gemm = simd_kernels.GEMMConfig(alpha=2.0, beta=0.5, isa="avx2")
-C = gemm(A, B)                      # uses stored alpha=2.0, beta=0.5
-C = gemm(A, B, alpha=1.0, beta=0.0) # per-call override
+C = gemm(A, B)                      # uses stored alpha=2.0, beta=0.5, forces AVX2
+C = gemm(A, B, alpha=1.0, beta=0.0) # per-call alpha/beta override (isa stays "avx2")
 print(gemm)                          # GEMMConfig(alpha=2.0, beta=0.5, isa='avx2')
 ```
 
 `isa` must be one of `""`, `"avx2"`, `"avx512"`, `"scalar"` — an invalid
-value raises `ValueError` at construction time. The `isa=` parameter is also
-accepted directly by `sgemm()`:
+value raises `ValueError` at construction time (`GEMMConfig`) or `RuntimeError`
+(`sgemm()`, checked on every call). The `isa=` parameter is also accepted
+directly by `sgemm()`:
 
 ```python
-C = simd_kernels.sgemm(A, B, isa="avx2")   # validated, currently informational
+C = simd_kernels.sgemm(A, B, isa="avx2")     # forces the 8×8 AVX2 kernel
+C = simd_kernels.sgemm(A, B, isa="avx512")   # forces the 8×16 AVX-512 kernel
+C = simd_kernels.sgemm(A, B)                 # "" = auto-detect (default)
 ```
 
-**Why is `isa=` "currently informational"?** The runtime dispatcher
-(`kernel_registry.hpp`) already selects the best available SIMD path via
-CPUID at process startup — there is one compiled GEMM kernel per ISA tier,
-not a runtime-selectable set. The `isa=` parameter exists today for forward
-API compatibility: once the dual-accumulator AVX-512 kernel lands
-(`docs/ROADMAP.md §v0.8`), this parameter will let callers explicitly select
-between the AVX2 and AVX-512 paths on AVX-512-capable hardware.
+**`isa=` genuinely forces a specific kernel** — this is a real per-call
+override, not just a validated-and-ignored hint. Useful for benchmarking
+AVX2 vs AVX-512 on the same AVX-512-capable machine, or for reproducing a
+specific numeric result independent of what hardware auto-detection would
+otherwise choose. The override applies **only to that call** — it does not
+change behavior for subsequent calls that omit `isa=`.
+
+Two important edge cases:
+
+- **`isa="avx512"` on hardware without AVX-512F+DQ raises `RuntimeError`.**
+  Check `simd_kernels.avx512_available()` first if you're not sure:
+  ```python
+  if simd_kernels.avx512_available():
+      C = simd_kernels.sgemm(A, B, isa="avx512")
+  ```
+- **`isa="scalar"` raises `RuntimeError` ("not yet implemented"), not a
+  silent fallback.** No forced full-matrix scalar path exists for
+  `sgemm_packed` yet — scalar code only runs internally for small edge/tail
+  blocks that don't fill a complete register tile. Silently falling back to
+  SIMD when the user explicitly asked for scalar would be a transparency
+  violation, so this is a hard error instead.
 
 ---
 
@@ -190,7 +207,16 @@ info = simd_kernels.build_info()
 
 ### `detected_isa() → str`
 
-Return the runtime-detected ISA string: `'avx512'`, `'avx2'`, `'sse42'`, or `'scalar'`.
+Return the runtime-detected ISA string: `'avx512'`, `'avx2'`, `'sse42'`, or `'scalar'`. This reflects the process-wide default (computed once at startup) — it does **not** change based on any `isa=` override used on individual `sgemm()` calls.
+
+### `avx512_available() → bool`
+
+Return `True` if this CPU supports AVX-512F+DQ (the instructions required by `sgemm_packed`'s 8×16 micro-kernel), independent of any `isa=` override. Check this before requesting `isa="avx512"` explicitly to avoid a `RuntimeError` on unsupported hardware:
+
+```python
+if simd_kernels.avx512_available():
+    C = simd_kernels.sgemm(A, B, isa="avx512")
+```
 
 ### `is_aligned(arr: np.ndarray) → bool`
 
