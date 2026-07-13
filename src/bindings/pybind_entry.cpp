@@ -100,22 +100,62 @@ static void check_writeable(const py::array& arr, const char* name) {
  * Returns:
  *   C array (same object as input C if provided, else newly allocated)
  */
+
+/**
+ * IsaOverrideGuard — RAII wrapper around simd_ml::gemm::set_gemm_isa_override.
+ *
+ * Saves the current thread-local override on construction, applies the
+ * requested one, and restores the previous value on destruction (including
+ * on the exception path) — so a single sgemm(..., isa=...) call cannot leak
+ * its override into unrelated subsequent calls on the same thread.
+ */
+class IsaOverrideGuard {
+public:
+    explicit IsaOverrideGuard(const std::string& isa)
+        : previous_(simd_ml::gemm::get_gemm_isa_override()) {
+        simd_ml::gemm::set_gemm_isa_override(isa.empty() ? nullptr : isa.c_str());
+    }
+    ~IsaOverrideGuard() {
+        simd_ml::gemm::set_gemm_isa_override(previous_.c_str());
+    }
+    IsaOverrideGuard(const IsaOverrideGuard&) = delete;
+    IsaOverrideGuard& operator=(const IsaOverrideGuard&) = delete;
+private:
+    std::string previous_;
+};
+
 static py::array_t<float> py_sgemm(py::array A,
                                      py::array B,
                                      py::object C   = py::none(),
                                      float alpha    = 1.0f,
                                      float beta     = 0.0f,
                                      const std::string& isa = "") {
-    // isa= is accepted for API compatibility with the roadmap DX vision
-    // (sk.gemm(A, B, isa="avx512")). Currently we dispatch at runtime via
-    // kernel_registry so the isa= hint is validated but not acted upon —
-    // the runtime dispatcher selects the best available implementation.
-    // When the AVX-512 dual-accumulator kernel lands (ROADMAP.md §v0.8),
-    // this parameter will select the 6×32 ZMM path explicitly.
+    // isa="" (default) uses the runtime auto-detected kernel — this is what
+    // essentially all callers want. Explicit values force a specific kernel
+    // for exactly this call (see IsaOverrideGuard above for the per-call,
+    // not-sticky, semantics).
     if (!isa.empty() && isa != "avx2" && isa != "avx512" && isa != "scalar") {
         throw std::runtime_error(
             "isa must be one of: 'avx2', 'avx512', 'scalar' (got '" + isa + "')");
     }
+    if (isa == "scalar") {
+        // Honest error rather than silently falling back to auto: a forced
+        // full-matrix scalar GEMM path is not implemented for sgemm_packed
+        // (scalar code only runs internally for small edge/tail blocks).
+        throw std::runtime_error(
+            "isa='scalar' is not yet implemented for sgemm_packed "
+            "(scalar_sgemm() is available separately as a reference "
+            "implementation, but is not wired into sgemm's isa= override). "
+            "Use isa='avx2' or isa='avx512' to force a SIMD kernel, or "
+            "isa='' for automatic hardware detection.");
+    }
+    if (isa == "avx512" && !simd_ml::gemm::gemm_packed_avx512_hardware_available()) {
+        throw std::runtime_error(
+            "isa='avx512' was requested but this CPU does not support "
+            "AVX-512F+DQ. Use isa='avx2' or isa='' (auto-detect) instead. "
+            "Check simd_kernels.avx512_available() to query hardware support.");
+    }
+
     validate_array(A, "A");
     validate_array(B, "B");
     if (A.ndim() != 2) throw std::runtime_error("A must be 2-D");
@@ -156,6 +196,7 @@ static py::array_t<float> py_sgemm(py::array A,
 
     {
         py::gil_scoped_release release;
+        IsaOverrideGuard guard(isa);   // no-op restore if isa == "" (auto)
         simd_ml::gemm::sgemm_packed(M, N, K, alpha, A_ptr, K, B_ptr, N, beta, C_ptr, N);
     }
     return C_out;
@@ -443,6 +484,16 @@ B     : np.ndarray[float32], shape [K, N], C-contiguous
 C     : np.ndarray[float32], shape [M, N], optional (allocated if None)
 alpha : float, default 1.0
 beta  : float, default 0.0  (0 = overwrite C, 1 = accumulate into C)
+isa   : str, default "" (auto-detect). One of "", "avx2", "avx512".
+        Forces this specific call to use the named kernel instead of the
+        runtime auto-detected one — e.g. for benchmarking AVX2 vs AVX-512
+        on the same AVX-512-capable machine. Requesting "avx512" on
+        hardware without AVX-512F+DQ raises RuntimeError (check
+        simd_kernels.avx512_available() first). This override applies only
+        to this call — it does not change behavior for subsequent calls.
+        "scalar" is validated as a recognized value but raises
+        RuntimeError ("not yet implemented") rather than silently falling
+        back, since no forced full-matrix scalar path exists yet.
 
 Returns
 -------
@@ -451,9 +502,9 @@ np.ndarray[float32] of shape [M, N] — same object as C if provided.
 Notes
 -----
 Uses a Goto/BLIS-style packed GEMM with register blocking (8×8 AVX2 or
-8×16 AVX-512 micro-tile, auto-dispatched at runtime), panel packing, and
-FMA intrinsics. Achieves 55–59% of OpenBLAS single-threaded throughput for
-N≥256 (measured; see docs/BENCHMARKS.md). Small matrices (N≤64) lag further
+8×16 AVX-512 micro-tile, auto-dispatched at runtime unless isa= forces a
+choice), panel packing, and FMA intrinsics. Achieves 55–59% of OpenBLAS
+single-threaded throughput for N≥256 (measured; see docs/BENCHMARKS.md). Small matrices (N≤64) lag further
 behind (~4%) and can even be slower than a plain scalar loop — packing
 overhead dominates and is not yet amortised at that size, and wider SIMD
 doesn't help a packing-bound regime — see DESIGN.md §7 for the full gap
@@ -527,6 +578,18 @@ np.ndarray[float32] same shape as x.
     m.def("detected_isa", []() {
         return std::string(simd_ml::dispatch::detected_isa());
     }, "Return the runtime-detected ISA label (avx512|avx2|sse42|scalar).");
+
+    m.def("avx512_available", []() {
+        return simd_ml::gemm::gemm_packed_avx512_hardware_available();
+    }, R"doc(
+Return True if this CPU supports AVX-512F+DQ (the instructions required by
+sgemm_packed's 8x16 micro-kernel), independent of any isa= override.
+
+Useful for checking before requesting isa='avx512' explicitly:
+
+>>> if simd_kernels.avx512_available():
+...     C = simd_kernels.sgemm(A, B, isa='avx512')
+)doc");
 
     m.def("is_aligned", &py_is_aligned,
           py::arg("arr"),

@@ -32,6 +32,7 @@
 #include <cstdint>
 #include <cstring>
 #include <atomic>
+#include <string_view>
 
 #ifdef SIMD_ML_OPENMP
 #  include <omp.h>
@@ -388,13 +389,58 @@ void inner_kernel_8x16_avx512(const float* __restrict__ A_packed,
 }
 #endif  // __AVX512F__
 
-// ─── ISA diagnostics ──────────────────────────────────────────────────────────
-bool gemm_packed_isa_is_avx512() noexcept {
+// ─── ISA diagnostics and per-thread override ─────────────────────────────────
+namespace {
+enum class IsaOverride : int { Auto = 0, ForceAvx2 = 1, ForceAvx512 = 2 };
+// thread_local (not a shared atomic): designed for RAII-style set/reset
+// around a single call, matching the per-call `isa=` kwarg semantics —
+// see the header doc comment for set_gemm_isa_override.
+thread_local IsaOverride g_isa_override = IsaOverride::Auto;
+}  // namespace
+
+bool gemm_packed_avx512_hardware_available() noexcept {
 #ifdef __AVX512F__
     return __builtin_cpu_supports("avx512f") && __builtin_cpu_supports("avx512dq");
 #else
     return false;
 #endif
+}
+
+bool gemm_packed_isa_is_avx512() noexcept {
+    const bool hw_avx512 = gemm_packed_avx512_hardware_available();
+    switch (g_isa_override) {
+        case IsaOverride::ForceAvx2:
+            return false;  // always honor an explicit AVX2 request
+        case IsaOverride::ForceAvx512:
+            // Never claim AVX-512 if the hardware doesn't actually support
+            // it — issuing AVX-512 instructions on unsupported hardware
+            // would raise SIGILL. Callers wanting a hard error instead of
+            // this silent, safe fallback should check
+            // gemm_packed_avx512_hardware_available() themselves before
+            // calling set_gemm_isa_override("avx512") — the Python binding
+            // does exactly this.
+            return hw_avx512;
+        case IsaOverride::Auto:
+        default:
+            return hw_avx512;
+    }
+}
+
+void set_gemm_isa_override(const char* isa) noexcept {
+    if (isa == nullptr) { g_isa_override = IsaOverride::Auto; return; }
+    const std::string_view sv(isa);
+    if (sv == "avx2")        g_isa_override = IsaOverride::ForceAvx2;
+    else if (sv == "avx512") g_isa_override = IsaOverride::ForceAvx512;
+    else                     g_isa_override = IsaOverride::Auto;  // "", "auto", or unknown
+}
+
+const char* get_gemm_isa_override() noexcept {
+    switch (g_isa_override) {
+        case IsaOverride::ForceAvx2:   return "avx2";
+        case IsaOverride::ForceAvx512: return "avx512";
+        case IsaOverride::Auto:
+        default:                      return "auto";
+    }
 }
 
 // ─── sgemm_packed: 5-loop Goto/BLIS GEMM ─────────────────────────────────────
