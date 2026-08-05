@@ -39,7 +39,6 @@ jobs:
             --checks='bugprone-*,cppcoreguidelines-*,modernize-*,performance-*,portability-*,readability-*,-modernize-use-trailing-return-type,-cppcoreguidelines-avoid-magic-numbers,-readability-magic-numbers' \
             --warnings-as-errors='' \
             $FILES \
-            -- -I src/kernels -I src \
             2>&1 | tee clang_tidy_report.txt || true
           # Fail if real errors (not warnings) found
           if grep -E "^.*: error:" clang_tidy_report.txt; then

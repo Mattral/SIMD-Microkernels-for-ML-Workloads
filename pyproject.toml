@@ -33,7 +33,7 @@ Issues     = "https://github.com/Mattral/SIMD-Microkernels-for-ML-Workloads/issu
 # ─── scikit-build-core CMake settings ─────────────────────────────────────────
 [tool.scikit-build]
 cmake.build-type = "Release"
-cmake.verbose    = false
+build.verbose    = false
 wheel.packages   = []     # C extension only — no Python package directory
 # Only install the Python extension module into the wheel. Without this,
 # scikit-build-core packages everything the project's CMakeLists.txt
