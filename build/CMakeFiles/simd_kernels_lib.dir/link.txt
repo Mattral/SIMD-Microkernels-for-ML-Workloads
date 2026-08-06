@@ -1,2 +1,0 @@
-/usr/bin/ar qc libsimd_kernels_lib.a CMakeFiles/simd_kernels_lib.dir/src/kernels/avx_matmul.cpp.o CMakeFiles/simd_kernels_lib.dir/src/kernels/intrinsic_gelu.cpp.o CMakeFiles/simd_kernels_lib.dir/src/kernels/gemm/avx2_gemm_packed.cpp.o CMakeFiles/simd_kernels_lib.dir/src/kernels/activations/relu_avx2.cpp.o CMakeFiles/simd_kernels_lib.dir/src/kernels/activations/silu_avx2.cpp.o CMakeFiles/simd_kernels_lib.dir/src/kernels/activations/softmax_avx2.cpp.o CMakeFiles/simd_kernels_lib.dir/src/kernels/gemm/gemm_dispatcher.cpp.o
-/usr/bin/ranlib libsimd_kernels_lib.a

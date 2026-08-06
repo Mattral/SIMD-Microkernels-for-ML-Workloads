@@ -23,6 +23,32 @@ check_cxx_compiler_flag("-mavx512f" COMPILER_HAS_AVX512F)
 check_cxx_compiler_flag("-mavx2"    COMPILER_HAS_AVX2)
 check_cxx_compiler_flag("-mfma"     COMPILER_HAS_FMA)
 
+# ─── x86 SIMD kernel guard ───────────────────────────────────────────────────
+# All AVX2 kernel sources include <immintrin.h>, which is x86-only.
+# On ARM/RISC-V/etc. (e.g. macos-14 Apple Silicon) this is a hard compile
+# error, not just a warning.  Auto-detect from processor + compiler flags,
+# but let the caller override explicitly (CI macOS job passes -DSIMD_ML_ENABLE_X86=OFF).
+if(CMAKE_SYSTEM_PROCESSOR MATCHES "^(x86_64|i386|amd64|AMD64|i686)$" AND COMPILER_HAS_AVX2)
+    set(_X86_DEFAULT ON)
+else()
+    set(_X86_DEFAULT OFF)
+endif()
+option(SIMD_ML_ENABLE_X86
+    "Build x86/AVX2 SIMD kernel sources (auto-detected from processor and compiler)"
+    ${_X86_DEFAULT})
+# Safety net: prevent accidental -DSIMD_ML_ENABLE_X86=ON on a non-x86 host
+if(SIMD_ML_ENABLE_X86 AND NOT CMAKE_SYSTEM_PROCESSOR MATCHES "^(x86_64|i386|amd64|AMD64|i686)$")
+    message(WARNING
+        "SIMD_ML_ENABLE_X86=ON requested but processor is '${CMAKE_SYSTEM_PROCESSOR}' "
+        "(not x86/x86_64) — forcing OFF to prevent immintrin.h compilation errors.")
+    set(SIMD_ML_ENABLE_X86 OFF CACHE BOOL "" FORCE)
+endif()
+if(SIMD_ML_ENABLE_X86)
+    message(STATUS "x86 AVX2/FMA SIMD kernels ENABLED  (SIMD_ML_ENABLE_X86=ON)")
+else()
+    message(STATUS "Scalar-only build              (SIMD_ML_ENABLE_X86=OFF — non-x86 or no AVX2)")
+endif()
+
 # ─── Compiler flags ───────────────────────────────────────────────────────────
 # -O3           : full optimisation (vectorisation, loop unrolling, inlining)
 # -O2           : safe optimisation for IEEE-compliant precision tests
@@ -32,19 +58,29 @@ check_cxx_compiler_flag("-mfma"     COMPILER_HAS_FMA)
 #                 (appropriate for ML inference; training may need strict FP)
 # -DNDEBUG      : disable assert() overhead in production
 
-if(CMAKE_CXX_COMPILER_ID MATCHES "GNU|Clang")
+if(CMAKE_CXX_COMPILER_ID MATCHES "GNU|Clang|AppleClang")
     # -Wall -Wextra: enable broad warning set to catch real defects.
     # NOT -Werror: warning sets differ across GCC/Clang versions; -Werror
     #              would cause spurious CI failures on newer compilers.
     set(WARN_FLAGS "-Wall" "-Wextra" "-Wshadow" "-Wno-unused-parameter")
-    set(PERF_FLAGS      "-O3" "-march=native" "-mfma" "-ffast-math" "-DNDEBUG" ${WARN_FLAGS})
-    set(PRECISION_FLAGS "-O2" "-march=native" "-mfma" "-DNDEBUG"              ${WARN_FLAGS})
-    if(COMPILER_HAS_AVX512F)
-        message(STATUS "AVX-512 compiler support detected. Building for host ISA only.")
-    elseif(COMPILER_HAS_AVX2)
-        message(STATUS "AVX2 compiler support detected. Building for host ISA.")
+    # Only apply x86-specific arch flags when building x86 SIMD kernels.
+    # On ARM/Apple-Silicon -march=native is still safe (picks armv8-a+...) but
+    # -mfma is meaningless and generates "argument unused" warnings from Clang.
+    if(SIMD_ML_ENABLE_X86)
+        set(_ARCH_FLAGS "-march=native" "-mfma")
     else()
-        message(WARNING "No AVX2/AVX-512 compiler support detected. Building scalar-safe path.")
+        set(_ARCH_FLAGS "")
+    endif()
+    set(PERF_FLAGS      "-O3" ${_ARCH_FLAGS} "-ffast-math" "-DNDEBUG" ${WARN_FLAGS})
+    set(PRECISION_FLAGS "-O2" ${_ARCH_FLAGS} "-DNDEBUG"              ${WARN_FLAGS})
+    if(SIMD_ML_ENABLE_X86)
+        if(COMPILER_HAS_AVX512F)
+            message(STATUS "AVX-512 compiler support detected. Building for host ISA only.")
+        elseif(COMPILER_HAS_AVX2)
+            message(STATUS "AVX2 compiler support detected. Building for host ISA.")
+        else()
+            message(WARNING "No AVX2/AVX-512 compiler support detected. Building scalar-safe path.")
+        endif()
     endif()
 elseif(MSVC)
     set(PERF_FLAGS "/O2" "/arch:AVX2" "/DNDEBUG" "/fp:fast")
@@ -52,16 +88,28 @@ elseif(MSVC)
 endif()
 
 # ─── Kernel library (shared between Python extension and bench) ───────────────
-add_library(simd_kernels_lib STATIC
-    src/kernels/avx_matmul.cpp
-    src/kernels/intrinsic_gelu.cpp
-    src/kernels/gemm/avx2_gemm_packed.cpp
-    src/kernels/activations/relu_avx2.cpp
-    src/kernels/activations/silu_avx2.cpp
-    src/kernels/activations/softmax_avx2.cpp
-    src/kernels/activations/layer_norm_avx2.cpp
-    src/kernels/gemm/gemm_dispatcher.cpp
-)
+# AVX2 sources include <immintrin.h> and must not be compiled on non-x86 hosts.
+# gemm_dispatcher.cpp is always included: it has #if defined(__x86_64__) guards
+# internally and provides the scalar fallback path on ARM.
+if(SIMD_ML_ENABLE_X86)
+    set(KERNEL_SRCS
+        src/kernels/avx_matmul.cpp
+        src/kernels/intrinsic_gelu.cpp
+        src/kernels/gemm/avx2_gemm_packed.cpp
+        src/kernels/activations/relu_avx2.cpp
+        src/kernels/activations/silu_avx2.cpp
+        src/kernels/activations/softmax_avx2.cpp
+        src/kernels/activations/layer_norm_avx2.cpp
+        src/kernels/gemm/gemm_dispatcher.cpp
+    )
+else()
+    # Scalar-only path (ARM, RISC-V, …): dispatcher routes to naive_sgemm.
+    # No <immintrin.h> headers are included in this configuration.
+    set(KERNEL_SRCS
+        src/kernels/gemm/gemm_dispatcher.cpp
+    )
+endif()
+add_library(simd_kernels_lib STATIC ${KERNEL_SRCS})
 # BUILD_INTERFACE: in-source build uses src/ and src/kernels/ directly.
 # INSTALL_INTERFACE: installed consumers use ${prefix}/include/ so that
 # #include <simd_kernels/foo.hpp> resolves to ${prefix}/include/simd_kernels/foo.hpp
