@@ -175,7 +175,7 @@ benefit from a larger or smaller distance. This is a known tuning opportunity.
 | C++ intrinsics vs assembly   | 5–15% overhead         | Optional; use libxsmm? |
 | Fixed tile sizes             | 10–20% suboptimal      | Empirical search / BLIS auto-tune |
 | No NUMA-aware allocation     | Negligible for 1 socket| Add for multi-socket |
-| No packing-skip for small N  | GEMM slower than scalar below N≈128 (see BENCHMARKS.md) | Direct unpacked micro-kernel path |
+| No packing-skip for small N  | ~~GEMM slower than scalar below N≈128~~ **Fixed in v0.9**: `sgemm_direct_avx2` (plain AVX2 loop, no packing) dispatched automatically for `max(M,N,K) ≤ 128` | Done |
 | Single-threaded default      | Linear with core count | OpenMP (optional flag) |
 
 ---

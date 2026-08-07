@@ -20,6 +20,20 @@ static constexpr int KC = 256;
 static constexpr int MC = 128;
 static constexpr int NC = 2048;
 
+// ─── Small-matrix dispatch threshold ─────────────────────────────────────────
+// When max(M,N,K) ≤ SMALL_GEMM_THRESHOLD, sgemm_packed dispatches to
+// sgemm_direct_avx2 which skips panel packing entirely.
+//
+// Rationale (see BENCHMARKS.md §Positioning vs OpenBLAS and DESIGN.md §7):
+//   At N=64, the KC×NC packing buffer is ≈2 MB regardless of actual N.
+//   Allocating and filling it costs more time than the arithmetic itself,
+//   so sgemm_packed at N=64 runs at ~0.7× the speed of a plain AVX2 loop.
+//   At SMALL_GEMM_THRESHOLD=128, all three matrices (A+B+C ≈ 192 KB) fit
+//   comfortably in L2, hardware prefetch handles strided B access, and no
+//   packing is needed. Above the threshold, packing amortises quickly and
+//   the packed path wins.
+static constexpr int SMALL_GEMM_THRESHOLD = 128;
+
 // ─── AVX-512 tile constants ───────────────────────────────────────────────────
 // MR512 == MR: pack_a_panel is NR-independent so it is reused verbatim for
 // both ISA paths. NR512 = 16 (one full __m512 = 16 floats) — a SINGLE
@@ -126,10 +140,30 @@ const char* get_gemm_isa_override() noexcept;
 // ─── Main GEMM entry point ────────────────────────────────────────────────────
 
 /**
+ * sgemm_direct_avx2 — AVX2 GEMM without panel packing (small-matrix fast path)
+ *
+ * Accesses A and B directly with their original strides rather than packing
+ * into contiguous panels. For max(M,N,K) ≤ SMALL_GEMM_THRESHOLD (128), the
+ * entire working set fits in L2 cache and hardware prefetch handles the
+ * strided B access — making packing overhead a net loss.
+ *
+ * Exposed publicly (not just internal) so test_gemm_packed.cpp can verify it
+ * in isolation, independently of the dispatch path in sgemm_packed.
+ */
+void sgemm_direct_avx2(int M, int N, int K,
+                        float alpha,
+                        const float* A, int lda,
+                        const float* B, int ldb,
+                        float beta,
+                        float* C, int ldc) noexcept;
+
+/**
  * sgemm_packed — Compute C = alpha*A*B + beta*C  (float32, row-major)
  *
  * Implements the Goto/BLIS 5-loop structure with panel packing.
- * This is the kernel used by the Python dispatch layer (kernel_registry.hpp).
+ * Automatically dispatches to sgemm_direct_avx2 when
+ * max(M,N,K) ≤ SMALL_GEMM_THRESHOLD to avoid packing overhead on
+ * small matrices. This is the kernel used by the Python dispatch layer.
  */
 void sgemm_packed(int M, int N, int K,
                   float alpha,

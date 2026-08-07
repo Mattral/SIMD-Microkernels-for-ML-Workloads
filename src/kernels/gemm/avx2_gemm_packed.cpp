@@ -443,6 +443,84 @@ const char* get_gemm_isa_override() noexcept {
     }
 }
 
+// ─── Small-matrix direct path (no packing) ───────────────────────────────────
+/**
+ * sgemm_direct_avx2 — AVX2 GEMM without panel packing.
+ *
+ * Intended for small matrices where A, B, C together fit in L2 cache.
+ * In that regime, allocating the fixed-size KC×NC packing buffer (≈2 MB
+ * regardless of actual N) and filling it takes longer than the arithmetic
+ * itself — sgemm_packed benchmarks at ~0.7× naive scalar at N=64.
+ *
+ * This function processes the output matrix row-by-row (i-loop), vectorising
+ * the N dimension with AVX2 (NR=8 floats / __m256 per iteration):
+ *
+ *   for i in [0, M):
+ *     for j in [0, N) step NR:
+ *       acc[0..NR-1] = Σ_p  A[i][p] * B[p][j..j+NR-1]   (FMA, p-loop)
+ *       C[i][j..j+NR-1] = alpha * acc + beta * C[i][j..j+NR-1]
+ *     tail scalar for N % NR remaining columns
+ *
+ * B is accessed with stride ldb between k-steps — normally cache-unfriendly
+ * for large matrices (hence packing). For max(M,N,K) ≤ 128, the entire B
+ * fits in L2 (~64 KB at N=128, K=128), so hardware prefetch easily handles
+ * the stride and there are no effective cache misses.
+ *
+ * beta=0.0 is handled by zeroing C in the pre-pass, matching sgemm_packed's
+ * semantics (beta=0 must overwrite even NaN values in C — never multiply them).
+ */
+void sgemm_direct_avx2(int M, int N, int K,
+                        float alpha,
+                        const float* __restrict__ A, int lda,
+                        const float* __restrict__ B, int ldb,
+                        float beta,
+                        float*       __restrict__ C, int ldc) noexcept {
+    // beta pre-pass: C ← beta * C  (matches scale_matrix_c in sgemm_packed)
+    if (beta != 1.0f) {
+        for (int i = 0; i < M; ++i) {
+            float* crow = C + static_cast<std::size_t>(i) * ldc;
+            if (beta == 0.0f) {
+                std::fill(crow, crow + N, 0.0f);  // explicit zero — never multiply NaN
+            } else {
+                for (int j = 0; j < N; ++j) crow[j] *= beta;
+            }
+        }
+    }
+
+    const __m256 alpha_v = _mm256_set1_ps(alpha);
+
+    for (int i = 0; i < M; ++i) {
+        const float* a_row = A + static_cast<std::size_t>(i) * lda;
+        float*       c_row = C + static_cast<std::size_t>(i) * ldc;
+
+        // ── Vectorised NR=8 columns per iteration ────────────────────────────
+        // Inner k-loop: broadcast scalar a[i][p] and FMA against b[p][j..j+7].
+        // B[p*ldb + j] is strided (ldb floats between k-steps); at small N
+        // the full B matrix fits in L1/L2, so hardware prefetch is sufficient.
+        int j = 0;
+        for (; j + NR <= N; j += NR) {
+            __m256 acc = _mm256_setzero_ps();
+            for (int p = 0; p < K; ++p) {
+                acc = _mm256_fmadd_ps(
+                    _mm256_set1_ps(a_row[p]),
+                    _mm256_loadu_ps(B + static_cast<std::size_t>(p) * ldb + j),
+                    acc);
+            }
+            if (alpha != 1.0f) acc = _mm256_mul_ps(acc, alpha_v);
+            // C[i][j..j+7] += alpha * acc
+            _mm256_storeu_ps(c_row + j,
+                _mm256_add_ps(_mm256_loadu_ps(c_row + j), acc));
+        }
+        // ── Scalar tail for remaining N % NR columns ──────────────────────────
+        for (; j < N; ++j) {
+            float sum = 0.0f;
+            for (int p = 0; p < K; ++p)
+                sum += a_row[p] * B[static_cast<std::size_t>(p) * ldb + j];
+            c_row[j] += alpha * sum;
+        }
+    }
+}
+
 // ─── sgemm_packed: 5-loop Goto/BLIS GEMM ─────────────────────────────────────
 /**
  * sgemm_packed — Compute C = alpha*A*B + beta*C  (float32, row-major)
@@ -467,6 +545,23 @@ void sgemm_packed(int M, int N, int K,
                   float beta,
                   float*       __restrict__ C, int ldc) {
     if (M <= 0 || N <= 0 || K <= 0) return;
+
+    // ── Small-matrix fast path: skip panel packing ────────────────────────────
+    // sgemm_packed's packing buffers are fixed-size KC×NC ≈ 2 MB regardless of
+    // actual N. When all dimensions fit in L2 (max(M,N,K) ≤ SMALL_GEMM_THRESHOLD),
+    // allocating and filling those buffers costs more than the arithmetic:
+    // measured at ~0.7× naive scalar at N=64 (see BENCHMARKS.md §Positioning vs
+    // OpenBLAS). sgemm_direct_avx2 uses the original strides, achieving
+    // hardware-prefetch-friendly access because the entire working set is in L2.
+    //
+    // Note: this bypass runs before the ISA override check. Small matrices don't
+    // benefit meaningfully from AVX-512 vs AVX2 (bottleneck is memory, not FMA
+    // throughput), so the direct path always uses AVX2 width regardless of the
+    // isa= override value.
+    if (std::max({M, N, K}) <= SMALL_GEMM_THRESHOLD) {
+        sgemm_direct_avx2(M, N, K, alpha, A, lda, B, ldb, beta, C, ldc);
+        return;
+    }
 
     scale_matrix_c(C, M, N, ldc, beta);
 

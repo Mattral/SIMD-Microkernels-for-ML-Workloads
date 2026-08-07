@@ -243,6 +243,64 @@ static bool test_gemm_isa_override() {
     return all_pass;
 }
 
+static bool test_small_gemm_direct_path() {
+    // ── Direct-path correctness (sgemm_direct_avx2 vs naive_sgemm) ──────────
+    // Tests the no-packing fast path in isolation.  Each case is at or below
+    // SMALL_GEMM_THRESHOLD (128) so sgemm_packed would dispatch here anyway,
+    // but calling sgemm_direct_avx2 directly lets us verify the function
+    // itself, not just the dispatch decision.
+    bool all_pass = true;
+    struct Case { int M, N, K; float alpha, beta; const char* label; };
+    const Case cases[] = {
+        {  1,   8,   1, 1.0f, 0.0f, "1×8×1 (tiny)"},
+        {  8,   8,   8, 1.0f, 0.0f, "8×8×8 (one full tile)"},
+        {  7,   9,  11, 1.0f, 0.0f, "7×9×11 (all tails)"},
+        { 16,  16,  16, 1.0f, 0.0f, "16×16×16"},
+        { 64,  64,  64, 1.0f, 0.0f, "64×64×64 (key regression)"},
+        {128, 128, 128, 1.0f, 0.0f, "128×128×128 (at threshold)"},
+        { 64,  32,  48, 2.5f, 0.5f, "64×32×48 α=2.5 β=0.5"},
+        { 33,  41,  27, 0.5f, 1.0f, "33×41×27 α=0.5 β=1.0"},
+    };
+    for (const auto& c : cases) {
+        auto A     = make_aligned_array<float>(static_cast<std::size_t>(c.M) * c.K);
+        auto B     = make_aligned_array<float>(static_cast<std::size_t>(c.K) * c.N);
+        auto C_ref = make_aligned_array<float>(static_cast<std::size_t>(c.M) * c.N);
+        auto C_got = make_aligned_array<float>(static_cast<std::size_t>(c.M) * c.N);
+
+        fill_random(A.get(),     c.M * c.K, 11);
+        fill_random(B.get(),     c.K * c.N, 22);
+        fill_random(C_ref.get(), c.M * c.N, 33);
+        std::copy(C_ref.get(), C_ref.get() + c.M * c.N, C_got.get());
+
+        naive_sgemm(c.M, c.N, c.K,
+                    c.alpha, A.get(), c.K, B.get(), c.N,
+                    c.beta,  C_ref.get(), c.N);
+
+        simd_ml::gemm::sgemm_direct_avx2(c.M, c.N, c.K,
+                                          c.alpha, A.get(), c.K, B.get(), c.N,
+                                          c.beta,  C_got.get(), c.N);
+
+        float max_err = 0.0f;
+        for (int i = 0; i < c.M * c.N; ++i)
+            max_err = std::max(max_err, std::fabs(C_got[i] - C_ref[i]));
+
+        bool pass = (max_err < 1e-4f);
+        printf("  direct %-30s  max_abs=%.2e  %s\n",
+               c.label, max_err, pass ? "PASS" : "FAIL");
+        all_pass &= pass;
+    }
+
+    // ── Dispatch check: sgemm_packed on small inputs must match naive ────────
+    // If the dispatch is broken (direct path not reached), the packed path
+    // can still produce numerically correct results for these sizes — so this
+    // is a dispatch-neutral correctness check, not a strict dispatch test.
+    printf("  dispatch (sgemm_packed on small N via existing test suite):\n");
+    for (int s : {8, 16, 32, 64, 128})
+        all_pass &= test_sgemm_packed(s, s, s);
+
+    return all_pass;
+}
+
 int run_gemm_packed_tests() {
     printf("\n── Packed GEMM Correctness Tests ──\n");
     bool all_pass = true;
@@ -271,6 +329,10 @@ int run_gemm_packed_tests() {
 
     printf(" ISA override mechanism (isa= forcing):\n");
     all_pass &= test_gemm_isa_override();
+
+    printf(" Small-matrix direct path (SMALL_GEMM_THRESHOLD=%d, v0.9):\n",
+           simd_ml::gemm::SMALL_GEMM_THRESHOLD);
+    all_pass &= test_small_gemm_direct_path();
 
     printf("  Overall: %s\n", all_pass ? "ALL PASS" : "SOME FAILURES");
     return all_pass ? 0 : 1;

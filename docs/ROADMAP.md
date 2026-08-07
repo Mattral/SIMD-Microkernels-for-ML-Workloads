@@ -145,17 +145,14 @@ hardware where auto-detect and a forced choice happen to coincide.
 ---
 
 ## v0.9 — Additional Primitives (Planned)
-- [❌] Skip panel packing below a size threshold (direct unpacked micro-kernel
-      call for small N). Measured impact: IntrinsicML is at 3.9% of OpenBLAS
-      at N=64 vs 55–59% at N≥256 — packing overhead dominates small-matrix
-      GEMM and is not yet amortised. AVX-512 (§v0.8) barely moved the N=64
-      number (3.7%→3.9%) precisely because this regime isn't FMA-throughput-
-      bound. In fact, at N=64 `sgemm_packed` measures *slower* than a plain
-      `-O3 -ffast-math`-compiled scalar triple loop (~0.7×) — the compiler's
-      auto-vectorization of the naive reference has no packing overhead to
-      pay, unlike the packed kernel. See `docs/BENCHMARKS.md §Positioning vs
-      OpenBLAS` and `README.md §Performance` for the measurements that
-      identified this.
+- [✅] Skip panel packing below a size threshold (direct unpacked micro-kernel
+      call for small N). `sgemm_direct_avx2`: plain AVX2 FMA loop on original
+      strides, no buffer allocation. Dispatched automatically from `sgemm_packed`
+      when `max(M,N,K) ≤ SMALL_GEMM_THRESHOLD=128`. At N=64, the fixed KC×NC
+      packing buffer (≈2 MB regardless of actual N) was costing more than the
+      arithmetic itself, giving ~0.7× naive scalar. The direct path fixes this.
+      Tested in `test_gemm_packed.cpp::test_small_gemm_direct_path()` across 8
+      representative shapes including the key N=64 regression case.
 - [❌] BF16 GEMM kernel (AVX-512 BF16, relevant for modern LLM inference)
 - [❌] FP16 GEMM kernel (F16C extension)
 - [✅] Vectorized `exp` via Cody–Waite (`fast_exp_avx2` in `simd_math.hpp`, shared by GeLU/SiLU/Softmax)
