@@ -47,6 +47,7 @@
 
 #include "../kernels/activations/activations.hpp"
 #include "../kernels/gemm/avx2_gemm_packed.hpp"
+#include "../kernels/gemm/f16_gemm.hpp"
 #include "../kernels/intrinsic_gelu.hpp"
 #include "../kernels/cache_alloc.hpp"
 #include "../dispatch/kernel_registry.hpp"
@@ -392,6 +393,94 @@ static bool py_is_aligned(py::array arr) {
 
 // ─── Module definition ────────────────────────────────────────────────────────
 
+// ─── Binding: sgemm_f16 ──────────────────────────────────────────────────────
+/**
+ * sgemm_f16(A, B, alpha=1.0, beta=0.0, C=None) -> np.ndarray[float32]
+ *
+ * Half-precision GEMM: C[fp32] = alpha * A[fp16] @ B[fp16] + beta * C[fp32]
+ *
+ * A and B must be numpy arrays with dtype=np.float16. C (output) is float32
+ * to avoid overflow in intermediate sums. Raises RuntimeError if F16C is not
+ * available on this CPU (check simd_kernels.f16c_available() first).
+ */
+static py::array_t<float> py_sgemm_f16(py::array A,
+                                         py::array B,
+                                         float alpha   = 1.0f,
+                                         float beta    = 0.0f,
+                                         py::object C  = py::none()) {
+    // Check F16C availability (runtime, not compile-time)
+    if (!simd_ml::gemm::f16c_available()) {
+        throw std::runtime_error(
+            "sgemm_f16 requires F16C instructions which are not available on "
+            "this CPU. Check simd_kernels.f16c_available() before calling.");
+    }
+
+    // Validate A and B: must be float16 (kind='f', itemsize=2) and C-contiguous
+    auto check_f16 = [](const py::array& arr, const char* name) {
+        if (arr.dtype().kind() != 'f' || arr.dtype().itemsize() != 2) {
+            throw std::runtime_error(
+                std::string(name) + " must be float16 (dtype=np.float16). "
+                "Call arr.astype(np.float16) before passing.");
+        }
+        if (!arr.attr("flags").attr("c_contiguous").cast<bool>()) {
+            throw std::runtime_error(
+                std::string(name) + " must be C-contiguous. "
+                "Call numpy.ascontiguousarray(arr) before passing.");
+        }
+    };
+    check_f16(A, "A");
+    check_f16(B, "B");
+    if (A.ndim() != 2) throw std::runtime_error("A must be 2-D");
+    if (B.ndim() != 2) throw std::runtime_error("B must be 2-D");
+
+    int M = static_cast<int>(A.shape(0));
+    int K = static_cast<int>(A.shape(1));
+    int N = static_cast<int>(B.shape(1));
+
+    if (B.shape(0) != static_cast<py::ssize_t>(K)) {
+        throw std::runtime_error(
+            "Shape mismatch: A is [" + std::to_string(M) + "×" +
+            std::to_string(K) + "] but B is [" +
+            std::to_string(B.shape(0)) + "×" + std::to_string(N) + "]");
+    }
+
+    // Allocate or validate float32 C output
+    py::array_t<float> C_out;
+    if (C.is_none()) {
+        C_out = py::array_t<float>({M, N});
+        float* ptr = C_out.mutable_data();
+        if (beta != 0.0f) {
+            for (int i = 0; i < M * N; ++i) ptr[i] = 0.0f;
+        }
+    } else {
+        C_out = C.cast<py::array_t<float>>();
+        validate_array(C_out, "C");
+        check_writeable(C_out, "C");
+        if (C_out.ndim() != 2 || C_out.shape(0) != M || C_out.shape(1) != N) {
+            throw std::runtime_error(
+                "C must have shape [" + std::to_string(M) + "×" +
+                std::to_string(N) + "] and dtype float32");
+        }
+    }
+
+    const auto* A_ptr = static_cast<const uint16_t*>(A.data());
+    const auto* B_ptr = static_cast<const uint16_t*>(B.data());
+    float*      C_ptr = C_out.mutable_data();
+
+    {
+        py::gil_scoped_release release;
+        simd_ml::gemm::sgemm_f16_avx2(M, N, K,
+                                       alpha, A_ptr, K, B_ptr, N,
+                                       beta,  C_ptr, N);
+    }
+    return C_out;
+}
+
+// ─── Binding: f16c_available ──────────────────────────────────────────────────
+static bool py_f16c_available() {
+    return simd_ml::gemm::f16c_available();
+}
+
 // ─── GEMMConfig C++ struct ───────────────────────────────────────────────────
 /**
  * GEMMConfig — callable GEMM configuration object (roadmap §9 DX vision).
@@ -589,6 +678,51 @@ Useful for checking before requesting isa='avx512' explicitly:
 
 >>> if simd_kernels.avx512_available():
 ...     C = simd_kernels.sgemm(A, B, isa='avx512')
+)doc");
+
+    m.def("f16c_available", &py_f16c_available,
+          "Return True if this CPU supports F16C instructions (required by sgemm_f16).");
+
+    m.def("sgemm_f16", &py_sgemm_f16,
+          py::arg("A"), py::arg("B"),
+          py::arg("alpha") = 1.0f, py::arg("beta") = 0.0f,
+          py::arg("C") = py::none(),
+          R"doc(
+FP16-input GEMM: C[float32] = alpha * A[float16] @ B[float16] + beta * C[float32]
+
+A and B must have dtype=np.float16 (IEEE 754 half-precision, 16-bit).
+C (output) is always float32 — accumulation in FP16 would lose precision
+at K > 64, so the output stays in full precision.
+
+Requires F16C instructions (Haswell+, AMD Piledriver+). Check
+simd_kernels.f16c_available() before calling; raises RuntimeError if absent.
+
+Parameters
+----------
+A     : ndarray[float16], shape [M, K], C-contiguous
+B     : ndarray[float16], shape [K, N], C-contiguous
+alpha : float, default 1.0
+beta  : float, default 0.0  (0 = overwrite C, 1 = accumulate into C)
+C     : ndarray[float32], shape [M, N], optional (allocated if None)
+
+Returns
+-------
+ndarray[float32] of shape [M, N]
+
+Notes
+-----
+Uses F16C (_mm256_cvtph_ps) to convert 8 FP16 values to FP32 in a single
+instruction, then accumulates with AVX2 FMA (_mm256_fmadd_ps). No panel
+packing — appropriate for the batch sizes (1–128) common in LLM inference
+where the entire working set fits in L2 cache.
+
+Example
+-------
+>>> import numpy as np, simd_kernels as sk
+>>> if sk.f16c_available():
+...     A = np.random.randn(64, 256).astype(np.float16)
+...     B = np.random.randn(256, 64).astype(np.float16)
+...     C = sk.sgemm_f16(A, B)   # float32 output
 )doc");
 
     m.def("is_aligned", &py_is_aligned,

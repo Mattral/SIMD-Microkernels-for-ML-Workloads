@@ -45,6 +45,44 @@ def sgemm(
     ...
 
 
+def sgemm_f16(
+    A: NDArray[np.float16],
+    B: NDArray[np.float16],
+    alpha: float = 1.0,
+    beta: float = 0.0,
+    C: Optional[NDArray[np.float32]] = None,
+) -> NDArray[np.float32]:
+    """
+    FP16-input GEMM: C[float32] = alpha * A[float16] @ B[float16] + beta * C[float32]
+
+    A and B must have dtype=np.float16 (IEEE 754 half-precision, 16-bit).
+    Output C is always float32 — FP16 accumulation loses precision at K > 64.
+
+    Requires F16C instructions (Haswell+, AMD Piledriver+). Check
+    f16c_available() before calling; raises RuntimeError if absent.
+
+    Parameters
+    ----------
+    A     : ndarray[float16], shape [M, K], C-contiguous
+    B     : ndarray[float16], shape [K, N], C-contiguous
+    alpha : float, default 1.0
+    beta  : float, default 0.0  (0 = overwrite C, 1 = accumulate into C)
+    C     : ndarray[float32], shape [M, N], optional (allocated if None)
+
+    Returns
+    -------
+    ndarray[float32], shape [M, N]
+
+    Example
+    -------
+    >>> if simd_kernels.f16c_available():
+    ...     A = np.random.randn(64, 256).astype(np.float16)
+    ...     B = np.random.randn(256, 64).astype(np.float16)
+    ...     C = simd_kernels.sgemm_f16(A, B)   # float32 result
+    """
+    ...
+
+
 class GEMMConfig:
     """
     Callable GEMM configuration object.
@@ -181,6 +219,17 @@ def avx512_available() -> bool:
 
     Check this before requesting isa='avx512' explicitly to avoid a
     RuntimeError on unsupported hardware.
+    """
+    ...
+
+
+def f16c_available() -> bool:
+    """
+    Return True if this CPU supports F16C instructions (_mm256_cvtph_ps).
+
+    F16C is available on Intel Haswell (2013) and later, and on AMD Piledriver
+    (2012) and later — essentially all CPUs that also have AVX2. Check this
+    before calling sgemm_f16() to get a clean error instead of SIGILL.
     """
     ...
 
