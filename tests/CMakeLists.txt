@@ -62,6 +62,7 @@ set(TEST_SRCS_X86
     test_gelu.cpp
     test_gemm.cpp
     test_gemm_packed.cpp
+    test_gemm_f16.cpp
     test_activations.cpp
     test_threads.cpp
 )
@@ -79,6 +80,12 @@ target_include_directories(simd_tests PRIVATE
 # conditionally call run_gelu_tests(), run_gemm_tests(), etc.
 if(SIMD_ML_ENABLE_X86)
     target_compile_definitions(simd_tests PRIVATE SIMD_ML_X86_AVAILABLE=1)
+    # test_gemm_f16.cpp uses F16C intrinsics (helper converters); give it
+    # the same -mf16c flag we pass to f16_gemm.cpp in the kernel library.
+    if(COMPILER_HAS_F16C)
+        set_source_files_properties(test_gemm_f16.cpp
+            PROPERTIES COMPILE_OPTIONS "-mf16c")
+    endif()
 else()
     target_compile_definitions(simd_tests PRIVATE SIMD_ML_X86_AVAILABLE=0)
 endif()

@@ -22,6 +22,7 @@ include(CheckCXXCompilerFlag)
 check_cxx_compiler_flag("-mavx512f" COMPILER_HAS_AVX512F)
 check_cxx_compiler_flag("-mavx2"    COMPILER_HAS_AVX2)
 check_cxx_compiler_flag("-mfma"     COMPILER_HAS_FMA)
+check_cxx_compiler_flag("-mf16c"    COMPILER_HAS_F16C)
 
 # ─── x86 SIMD kernel guard ───────────────────────────────────────────────────
 # All AVX2 kernel sources include <immintrin.h>, which is x86-only.
@@ -96,12 +97,25 @@ if(SIMD_ML_ENABLE_X86)
         src/kernels/avx_matmul.cpp
         src/kernels/intrinsic_gelu.cpp
         src/kernels/gemm/avx2_gemm_packed.cpp
+        src/kernels/gemm/f16_gemm.cpp
         src/kernels/activations/relu_avx2.cpp
         src/kernels/activations/silu_avx2.cpp
         src/kernels/activations/softmax_avx2.cpp
         src/kernels/activations/layer_norm_avx2.cpp
         src/kernels/gemm/gemm_dispatcher.cpp
     )
+    # f16_gemm.cpp needs -mf16c explicitly so __F16C__ is defined and
+    # _mm256_cvtph_ps / _cvtsh_ss are available, even on machines where
+    # -march=native might not cover F16C (e.g. cross-compile scenarios).
+    # The implementation guards with #ifndef __F16C__ and falls back to a
+    # no-op stub when the flag is absent, so the file always compiles safely.
+    if(COMPILER_HAS_F16C)
+        set_source_files_properties(src/kernels/gemm/f16_gemm.cpp
+            PROPERTIES COMPILE_OPTIONS "-mf16c")
+        message(STATUS "F16C support detected — FP16 GEMM kernel enabled")
+    else()
+        message(STATUS "F16C flag not supported — FP16 GEMM compiled as no-op stub")
+    endif()
 else()
     # Scalar-only path (ARM, RISC-V, …): dispatcher routes to naive_sgemm.
     # No <immintrin.h> headers are included in this configuration.
