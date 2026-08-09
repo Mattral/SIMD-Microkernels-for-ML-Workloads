@@ -154,7 +154,14 @@ hardware where auto-detect and a forced choice happen to coincide.
       Tested in `test_gemm_packed.cpp::test_small_gemm_direct_path()` across 8
       representative shapes including the key N=64 regression case.
 - [❌] BF16 GEMM kernel (AVX-512 BF16, relevant for modern LLM inference)
-- [❌] FP16 GEMM kernel (F16C extension)
+- [✅] FP16 GEMM kernel (F16C extension). `sgemm_f16_avx2`: converts FP16
+      inputs on load via `_mm256_cvtph_ps` (1 instruction per 8 values, hidden
+      behind FMA latency), accumulates in FP32, stores FP32 output. Exposed as
+      `simd_kernels.sgemm_f16(A_f16, B_f16)` → `ndarray[float32]`. Runtime
+      guard via `f16c_available()` / `simd_kernels.f16c_available()`.
+      Implemented in `src/kernels/gemm/f16_gemm.{hpp,cpp}`, tested in
+      `tests/test_gemm_f16.cpp` across 14 shapes including single-row
+      inference (M=1, N=64, K=128) and alpha/beta variants.
 - [✅] Vectorized `exp` via Cody–Waite (`fast_exp_avx2` in `simd_math.hpp`, shared by GeLU/SiLU/Softmax)
 - [✅] Vectorized Softmax inner loop using fast exp approximation (`softmax_avx2.cpp` Pass 2)
 - [❌] `FlashAttention`-style fused attention microkernel (research target)
