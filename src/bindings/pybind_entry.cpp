@@ -48,6 +48,7 @@
 #include "../kernels/activations/activations.hpp"
 #include "../kernels/gemm/avx2_gemm_packed.hpp"
 #include "../kernels/gemm/f16_gemm.hpp"
+#include "../kernels/gemm/bf16_gemm.hpp"
 #include "../kernels/intrinsic_gelu.hpp"
 #include "../kernels/cache_alloc.hpp"
 #include "../dispatch/kernel_registry.hpp"
@@ -481,6 +482,95 @@ static bool py_f16c_available() {
     return simd_ml::gemm::f16c_available();
 }
 
+// ─── Binding: sgemm_bf16 ─────────────────────────────────────────────────────
+/**
+ * sgemm_bf16(A, B, alpha=1.0, beta=0.0, C=None) -> np.ndarray[float32]
+ *
+ * BF16-input GEMM: C[fp32] = alpha * A[bf16] @ B[bf16] + beta * C[fp32]
+ * A and B must be numpy arrays with dtype=np.float32 reinterpreted as BF16
+ * (see notes below), or bfloat16 if supported by the numpy version.
+ * Raises ValueError if dtype/shape conditions are not met.
+ *
+ * NumPy note: numpy >= 2.0 has a native bfloat16 dtype. For earlier versions
+ * pass A.view(np.uint16) or use torch.Tensor.numpy() after .view(torch.uint16).
+ * The raw uint16 bit patterns of BF16 values are what this function expects.
+ */
+static py::array_t<float> py_sgemm_bf16(py::array A,
+                                          py::array B,
+                                          float alpha  = 1.0f,
+                                          float beta   = 0.0f,
+                                          py::object C = py::none()) {
+    // Accept both bfloat16 (numpy >= 2.0, kind='V', itemsize=2 OR kind='f'
+    // itemsize=2 depending on implementation) and uint16 (explicit bit cast).
+    auto is_bf16_compatible = [](const py::array& arr) {
+        auto dt = arr.dtype();
+        // numpy uint16 (kind='u', itemsize=2): explicit bit-cast
+        // numpy bfloat16 (kind='V', itemsize=2): ml_dtypes or numpy 2.0
+        // We accept both — the bit layout is identical.
+        return (dt.itemsize() == 2 &&
+                (dt.kind() == 'u' || dt.kind() == 'V' || dt.kind() == 'f'));
+    };
+
+    if (!is_bf16_compatible(A))
+        throw std::runtime_error(
+            "A must be uint16 (BF16 bit-cast) or bfloat16 (numpy>=2.0). "
+            "Use A.view(np.uint16) or arr.astype(bfloat16) as appropriate.");
+    if (!is_bf16_compatible(B))
+        throw std::runtime_error(
+            "B must be uint16 (BF16 bit-cast) or bfloat16 (numpy>=2.0). "
+            "Use B.view(np.uint16) or arr.astype(bfloat16) as appropriate.");
+    if (A.ndim() != 2) throw std::runtime_error("A must be 2-D");
+    if (B.ndim() != 2) throw std::runtime_error("B must be 2-D");
+    if (!A.attr("flags").attr("c_contiguous").cast<bool>())
+        throw std::runtime_error("A must be C-contiguous");
+    if (!B.attr("flags").attr("c_contiguous").cast<bool>())
+        throw std::runtime_error("B must be C-contiguous");
+
+    int M = static_cast<int>(A.shape(0));
+    int K = static_cast<int>(A.shape(1));
+    int N = static_cast<int>(B.shape(1));
+
+    if (B.shape(0) != static_cast<py::ssize_t>(K))
+        throw std::runtime_error(
+            "Shape mismatch: A is [" + std::to_string(M) + "×" +
+            std::to_string(K) + "] but B is [" +
+            std::to_string(B.shape(0)) + "×" + std::to_string(N) + "]");
+
+    // Allocate or validate FP32 C output
+    py::array_t<float> C_out;
+    if (C.is_none()) {
+        C_out = py::array_t<float>({M, N});
+        if (beta != 0.0f) {
+            float* ptr = C_out.mutable_data();
+            std::fill(ptr, ptr + M * N, 0.0f);
+        }
+    } else {
+        C_out = C.cast<py::array_t<float>>();
+        validate_array(C_out, "C");
+        check_writeable(C_out, "C");
+        if (C_out.ndim() != 2 || C_out.shape(0) != M || C_out.shape(1) != N)
+            throw std::runtime_error(
+                "C must have shape [" + std::to_string(M) + "×" +
+                std::to_string(N) + "] and dtype float32");
+    }
+
+    const auto* A_ptr = static_cast<const uint16_t*>(A.data());
+    const auto* B_ptr = static_cast<const uint16_t*>(B.data());
+    float*      C_ptr = C_out.mutable_data();
+
+    {
+        py::gil_scoped_release release;
+        simd_ml::gemm::sgemm_bf16_avx2(M, N, K,
+                                        alpha, A_ptr, K, B_ptr, N,
+                                        beta,  C_ptr, N);
+    }
+    return C_out;
+}
+
+static bool py_bf16_avx512bf16_available() {
+    return simd_ml::gemm::bf16_avx512bf16_available();
+}
+
 // ─── GEMMConfig C++ struct ───────────────────────────────────────────────────
 /**
  * GEMMConfig — callable GEMM configuration object (roadmap §9 DX vision).
@@ -678,6 +768,53 @@ Useful for checking before requesting isa='avx512' explicitly:
 
 >>> if simd_kernels.avx512_available():
 ...     C = simd_kernels.sgemm(A, B, isa='avx512')
+)doc");
+
+    m.def("bf16_avx512bf16_available", &py_bf16_avx512bf16_available,
+          "Return True if this CPU supports AVX-512 BF16 (vdpbf16ps). "
+          "Not required for sgemm_bf16 (which uses AVX2); indicates "
+          "availability of the higher-throughput packing path (v1.0 roadmap).");
+
+    m.def("sgemm_bf16", &py_sgemm_bf16,
+          py::arg("A"), py::arg("B"),
+          py::arg("alpha") = 1.0f, py::arg("beta") = 0.0f,
+          py::arg("C") = py::none(),
+          R"doc(
+BF16-input GEMM: C[float32] = alpha * A[bfloat16] @ B[bfloat16] + beta * C[float32]
+
+A and B store Brain Float 16 values (same exponent as FP32, 7-bit mantissa).
+Output C is always float32 — BF16 accumulation would lose mantissa bits at
+each step. Requires only AVX2 (Haswell+); no special -mavx512bf16 flag.
+
+BF16→FP32 conversion uses the zero-extend+shift trick: BF16 is the top 16
+bits of FP32, so shifting left 16 reconstructs the full float bit pattern
+(3 integer AVX2 instructions per 8 values, cheaper than F16C's VCVTPH2PS).
+
+Input formats accepted
+----------------------
+numpy >= 2.0: pass arrays with dtype=numpy.float32 reinterpreted as BF16
+              using arr.view(np.uint16), or native bfloat16 dtype if available.
+PyTorch:      pass tensor.view(torch.uint16).numpy() for BF16 tensors.
+ml_dtypes:    pass arrays with dtype=ml_dtypes.bfloat16 (itemsize=2).
+
+Parameters
+----------
+A     : array-like [M, K], BF16 bit patterns (uint16 or bfloat16 dtype)
+B     : array-like [K, N], BF16 bit patterns (uint16 or bfloat16 dtype)
+alpha : float, default 1.0
+beta  : float, default 0.0  (0 = overwrite C, 1 = accumulate into C)
+C     : ndarray[float32], shape [M, N], optional (allocated if None)
+
+Returns
+-------
+ndarray[float32], shape [M, N]
+
+Example
+-------
+>>> import numpy as np, simd_kernels as sk
+>>> A_f32 = np.random.randn(64, 256).astype(np.float32)
+>>> A_bf16 = A_f32.view(np.uint16)[..., 1::2]  # take upper 16 bits
+>>> # Easier: use torch or ml_dtypes for proper BF16 arrays
 )doc");
 
     m.def("f16c_available", &py_f16c_available,

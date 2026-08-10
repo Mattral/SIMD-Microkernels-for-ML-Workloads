@@ -234,6 +234,50 @@ def f16c_available() -> bool:
     ...
 
 
+def bf16_avx512bf16_available() -> bool:
+    """
+    Return True if this CPU supports AVX-512 BF16 (vdpbf16ps instruction).
+
+    Available on Intel Ice Lake-SP (Xeon, 2021+), Sapphire Rapids,
+    and AMD Zen4+ (EPYC Genoa). NOT required for sgemm_bf16 (which uses the
+    AVX2 zero-extend path). Indicates availability of the higher-throughput
+    vdpbf16ps packing path planned for v1.0.
+    """
+    ...
+
+
+def sgemm_bf16(
+    A: np.ndarray,
+    B: np.ndarray,
+    alpha: float = 1.0,
+    beta: float = 0.0,
+    C: Optional[NDArray[np.float32]] = None,
+) -> NDArray[np.float32]:
+    """
+    BF16-input GEMM: C[float32] = alpha * A[bfloat16] @ B[bfloat16] + beta * C[float32]
+
+    A and B store Brain Float 16 values (same exponent range as FP32, 7-bit mantissa).
+    Accepts uint16 dtype (explicit bit-cast) or bfloat16 dtype (numpy>=2.0 / ml_dtypes).
+    Output C is always float32.
+
+    Requires only AVX2 (Haswell+) — no special AVX-512 BF16 flag needed.
+    BF16→FP32 uses the zero-extend+shift trick (3 integer instructions per 8 values).
+
+    Parameters
+    ----------
+    A     : array [M, K], dtype=uint16 or bfloat16, C-contiguous
+    B     : array [K, N], dtype=uint16 or bfloat16, C-contiguous
+    alpha : float, default 1.0
+    beta  : float, default 0.0  (0 = overwrite C, 1 = accumulate)
+    C     : ndarray[float32], shape [M, N], optional
+
+    Returns
+    -------
+    ndarray[float32], shape [M, N]
+    """
+    ...
+
+
 def is_aligned(arr: np.ndarray) -> bool:
     """Return True if the array's data buffer is 64-byte aligned."""
     ...
