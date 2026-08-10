@@ -153,7 +153,15 @@ hardware where auto-detect and a forced choice happen to coincide.
       arithmetic itself, giving ~0.7× naive scalar. The direct path fixes this.
       Tested in `test_gemm_packed.cpp::test_small_gemm_direct_path()` across 8
       representative shapes including the key N=64 regression case.
-- [❌] BF16 GEMM kernel (AVX-512 BF16, relevant for modern LLM inference)
+- [✅] BF16 GEMM kernel (AVX2 zero-extend path; vdpbf16ps packing path → v1.0).
+      `sgemm_bf16_avx2`: converts BF16→FP32 using only AVX2 integer ops
+      (`_mm256_cvtepu16_epi32` + `_mm256_slli_epi32`, 3 instructions per 8
+      values — cheaper than F16C's VCVTPH2PS). Requires no special compile
+      flag beyond AVX2. `bf16_avx512bf16_available()` provides a runtime
+      check for vdpbf16ps availability (Ice Lake-SP+) ahead of the v1.0
+      packing path. Exposed as `simd_kernels.sgemm_bf16(A, B)` → float32.
+      Tested in `tests/test_gemm_bf16.cpp` across 14 shapes including BF16
+      bit-pattern unit test and beta=0 NaN-safety check.
 - [✅] FP16 GEMM kernel (F16C extension). `sgemm_f16_avx2`: converts FP16
       inputs on load via `_mm256_cvtph_ps` (1 instruction per 8 values, hidden
       behind FMA latency), accumulates in FP32, stores FP32 output. Exposed as

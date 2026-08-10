@@ -24,6 +24,7 @@ int run_gelu_tests();
 int run_gemm_tests();
 int run_gemm_packed_tests();
 int run_f16_gemm_tests();
+int run_bf16_gemm_tests();
 int run_activation_tests();
 int run_thread_tests();
 #endif
@@ -46,6 +47,7 @@ int main() {
     result |= run_gemm_tests();
     result |= run_gemm_packed_tests();
     result |= run_f16_gemm_tests();
+    result |= run_bf16_gemm_tests();
     result |= run_activation_tests();
     result |= run_thread_tests();
 #else
