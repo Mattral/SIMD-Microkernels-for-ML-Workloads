@@ -98,6 +98,7 @@ if(SIMD_ML_ENABLE_X86)
         src/kernels/intrinsic_gelu.cpp
         src/kernels/gemm/avx2_gemm_packed.cpp
         src/kernels/gemm/f16_gemm.cpp
+        src/kernels/gemm/bf16_gemm.cpp
         src/kernels/activations/relu_avx2.cpp
         src/kernels/activations/silu_avx2.cpp
         src/kernels/activations/softmax_avx2.cpp
@@ -116,6 +117,11 @@ if(SIMD_ML_ENABLE_X86)
     else()
         message(STATUS "F16C flag not supported — FP16 GEMM compiled as no-op stub")
     endif()
+    # bf16_gemm.cpp uses only AVX2 integer instructions for BF16→FP32 conversion
+    # (_mm256_cvtepu16_epi32 + _mm256_slli_epi32): no -mavx512bf16 required.
+    # AVX-512 BF16 (vdpbf16ps) availability is a runtime-only check via
+    # bf16_avx512bf16_available(); the packing-based vdpbf16ps path is v1.0.
+    message(STATUS "BF16 GEMM kernel enabled (AVX2 zero-extend path, no special flag)")
 else()
     # Scalar-only path (ARM, RISC-V, …): dispatcher routes to naive_sgemm.
     # No <immintrin.h> headers are included in this configuration.

@@ -63,6 +63,7 @@ set(TEST_SRCS_X86
     test_gemm.cpp
     test_gemm_packed.cpp
     test_gemm_f16.cpp
+    test_gemm_bf16.cpp
     test_activations.cpp
     test_threads.cpp
 )
